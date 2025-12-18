@@ -7,6 +7,7 @@ from app.logging import configure_logging
 from app.settings import get_settings
 
 from app.api.routes_debug import router as debug_router
+from app.api.routes_enrich import router as enrich_router
 from app.api.routes_health import router as health_router
 from app.api.routes_webhooks_calendly import router as calendly_router
 from app.api.routes_webhooks_readai import router as readai_router
@@ -15,6 +16,9 @@ from app.api.routes_webhooks_readai import router as readai_router
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
+
+    # Validate configuration and fail fast if critical errors found
+    settings.validate_and_fail_fast()
 
     app = FastAPI(
         title="GoVisually Integrations Service",
@@ -55,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(calendly_router)
     app.include_router(readai_router)
+    app.include_router(enrich_router)
     app.include_router(debug_router)
     return app
 

@@ -7,6 +7,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from app.services.redis_client import get_redis_str
+from app.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ def store_incoming_event(
     idempotency_key: str,
     payload: dict[str, Any],
 ) -> None:
+    settings = get_settings()
     r = get_redis_str()
     key = f"event:{event_id}"
     r.hset(
@@ -57,6 +59,8 @@ def store_incoming_event(
             "last_error": "",
         },
     )
+    # Set TTL to prevent unbounded Redis growth
+    r.expire(key, settings.EVENT_TTL_SECONDS)
 
 
 def set_event_status(event_id: str, status: str, *, last_error: str = "") -> None:

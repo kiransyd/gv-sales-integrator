@@ -33,4 +33,15 @@ def qa_to_text(qa: Any) -> str:
     return numbered_bullets(lines)
 
 
+def extract_domain_from_email(email: str) -> str:
+    """
+    Extract domain from email address.
+    Example: "john@acme.com" -> "acme.com"
+    """
+    if not email or "@" not in email:
+        return ""
+    return email.split("@")[1].strip().lower()
+
+
+
 

@@ -22,3 +22,4 @@ echo "  docker-compose logs worker --tail 200 | grep -E '(Creating Zoho|Updating
 echo ""
 echo "Or check the debug endpoints shown above."
 
+

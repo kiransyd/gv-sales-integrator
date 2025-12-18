@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from pydantic import Field
+import logging
+import sys
+from typing import Optional
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -90,6 +96,124 @@ class Settings(BaseSettings):
 
     # Optional
     CREATE_FOLLOWUP_TASK: bool = Field(default=False)
+
+    # Redis TTL configuration (in seconds)
+    EVENT_TTL_SECONDS: int = Field(default=30 * 24 * 60 * 60)  # 30 days
+    IDEMPOTENCY_TTL_SECONDS: int = Field(default=90 * 24 * 60 * 60)  # 90 days
+
+    # Apollo.io
+    APOLLO_API_KEY: str = Field(default="")
+    APOLLO_CACHE_TTL_DAYS: int = Field(default=30)
+
+    # ScraperAPI
+    SCRAPER_API_KEY: str = Field(default="")
+    SCRAPER_MAX_PAGES: int = Field(default=5)
+
+    # Enrichment Settings
+    ENABLE_AUTO_ENRICH_CALENDLY: bool = Field(default=False)
+    ENABLE_WEBSITE_SCRAPING: bool = Field(default=True)
+    ENRICH_SECRET_KEY: str = Field(default="")
+
+    # Apollo Zoho Field Mappings
+    ZCF_APOLLO_JOB_TITLE: str = Field(default="")
+    ZCF_APOLLO_SENIORITY: str = Field(default="")
+    ZCF_APOLLO_DEPARTMENT: str = Field(default="")
+    ZCF_APOLLO_LINKEDIN_URL: str = Field(default="")
+    ZCF_APOLLO_PHONE: str = Field(default="")
+    ZCF_APOLLO_COMPANY_SIZE: str = Field(default="")
+    ZCF_APOLLO_COMPANY_REVENUE: str = Field(default="")
+    ZCF_APOLLO_COMPANY_INDUSTRY: str = Field(default="")
+    ZCF_APOLLO_COMPANY_FOUNDED_YEAR: str = Field(default="")
+    ZCF_APOLLO_COMPANY_FUNDING_STAGE: str = Field(default="")
+    ZCF_APOLLO_COMPANY_FUNDING_TOTAL: str = Field(default="")
+    ZCF_APOLLO_TECH_STACK: str = Field(default="")
+
+    def validate_configuration(self) -> list[str]:
+        """
+        Validates settings and returns list of warnings/errors.
+        Critical errors should prevent startup.
+        Returns list of warning/error messages.
+        """
+        errors = []
+        warnings = []
+
+        # Critical: Redis
+        if not self.REDIS_URL:
+            errors.append("REDIS_URL is required")
+
+        # Critical: LLM (if not in DRY_RUN, we need Gemini)
+        if not self.DRY_RUN and not self.GEMINI_API_KEY:
+            errors.append("GEMINI_API_KEY is required when DRY_RUN=false")
+
+        # Critical: Zoho (if not in DRY_RUN)
+        if not self.DRY_RUN:
+            if not self.ZOHO_CLIENT_ID:
+                errors.append("ZOHO_CLIENT_ID is required when DRY_RUN=false")
+            if not self.ZOHO_CLIENT_SECRET:
+                errors.append("ZOHO_CLIENT_SECRET is required when DRY_RUN=false")
+            if not self.ZOHO_REFRESH_TOKEN:
+                errors.append("ZOHO_REFRESH_TOKEN is required when DRY_RUN=false")
+            if self.ZOHO_DC not in ["us", "au", "eu", "in"]:
+                errors.append(f"ZOHO_DC must be one of: us, au, eu, in (got: {self.ZOHO_DC})")
+
+        # Warning: Webhook authentication
+        if not self.CALENDLY_SIGNING_KEY:
+            warnings.append("CALENDLY_SIGNING_KEY not set - Calendly webhooks will not be authenticated")
+        if not self.READAI_SHARED_SECRET:
+            warnings.append("READAI_SHARED_SECRET not set - Read.ai webhooks will not be authenticated")
+
+        # Warning: Slack alerts
+        if not self.SLACK_WEBHOOK_URL:
+            warnings.append("SLACK_WEBHOOK_URL not set - failure alerts will not be sent")
+
+        # Warning: Zoho custom fields (only check a few critical ones)
+        if not self.DRY_RUN:
+            zcf_fields_missing = []
+            if not self.ZCF_DEMO_DATETIME:
+                zcf_fields_missing.append("ZCF_DEMO_DATETIME")
+            if not self.ZCF_LEAD_INTEL:
+                zcf_fields_missing.append("ZCF_LEAD_INTEL")
+            if not self.ZCF_MEDDIC_METRICS:
+                zcf_fields_missing.append("ZCF_MEDDIC_METRICS")
+
+            if zcf_fields_missing:
+                warnings.append(
+                    f"Critical Zoho custom fields not configured: {', '.join(zcf_fields_missing)}. "
+                    "LLM-extracted data will not be saved to these fields."
+                )
+
+        # Combine errors and warnings
+        all_messages = []
+        if errors:
+            all_messages.extend([f"ERROR: {e}" for e in errors])
+        if warnings:
+            all_messages.extend([f"WARNING: {w}" for w in warnings])
+
+        return all_messages
+
+    def validate_and_fail_fast(self) -> None:
+        """
+        Validates configuration and exits if critical errors found.
+        Logs warnings but continues.
+        """
+        messages = self.validate_configuration()
+
+        errors = [msg for msg in messages if msg.startswith("ERROR:")]
+        warnings = [msg for msg in messages if msg.startswith("WARNING:")]
+
+        if warnings:
+            logger.warning("Configuration warnings detected:")
+            for warning in warnings:
+                logger.warning("  %s", warning)
+
+        if errors:
+            logger.error("Critical configuration errors detected:")
+            for error in errors:
+                logger.error("  %s", error)
+            logger.error("Application cannot start. Please fix configuration errors above.")
+            sys.exit(1)
+
+        logger.info("Configuration validation passed")
 
 
 _settings: Settings | None = None

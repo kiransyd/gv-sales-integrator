@@ -10,10 +10,53 @@ from app.services.calendly_service import (
 )
 from app.services.event_store_service import load_event
 from app.services.llm_service import calendly_lead_intel
-from app.services.zoho_service import create_note, upsert_lead_by_email
+from app.services.zoho_service import create_note, update_lead, upsert_lead_by_email
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _auto_enrich_lead(email: str, lead_id: str) -> None:
+    """
+    Auto-enrich lead with Apollo + Website intelligence (if enabled).
+    This is a best-effort enrichment - failures are logged but don't fail the main job.
+    """
+    from app.jobs.enrich_jobs import _build_enrichment_note, _build_zoho_payload_from_enrichment, enrich_lead_by_email
+
+    settings = get_settings()
+
+    if not settings.ENABLE_AUTO_ENRICH_CALENDLY:
+        logger.debug("Auto-enrichment disabled (ENABLE_AUTO_ENRICH_CALENDLY=false)")
+        return
+
+    logger.info("Auto-enriching Calendly lead: %s", email)
+
+    try:
+        # Perform enrichment
+        enrichment = enrich_lead_by_email(email)
+
+        if not enrichment.data_sources:
+            logger.info("No enrichment data found for: %s", email)
+            return
+
+        # Build Zoho update payload from enrichment
+        zoho_payload = _build_zoho_payload_from_enrichment(enrichment)
+
+        # Update Zoho lead with enrichment data
+        if zoho_payload:
+            update_lead(lead_id, zoho_payload)
+            logger.info("Updated lead with enrichment data: %s (%d fields)", lead_id, len(zoho_payload))
+
+        # Create enrichment note
+        note_title = "Auto-Enrichment (Apollo + Website)"
+        note_content = _build_enrichment_note(enrichment)
+        create_note(lead_id, note_title, note_content)
+
+        logger.info("Auto-enrichment complete for: %s (%d sources)", email, len(enrichment.data_sources))
+
+    except Exception as e:  # noqa: BLE001
+        # Log but don't fail the main Calendly job
+        logger.warning("Auto-enrichment failed for %s: %s", email, e)
 
 
 def _process_created(ctx: JobContext) -> None:
@@ -59,6 +102,9 @@ def _process_created(ctx: JobContext) -> None:
         note_lines.append("Lead intel:")
         note_lines.append(intel_text)
     create_note(lead_id, note_title, "\n".join(note_lines).strip())
+
+    # Auto-enrich lead with Apollo + Website intelligence (if enabled)
+    _auto_enrich_lead(info.email, lead_id)
 
 
 def _process_canceled(ctx: JobContext) -> None:

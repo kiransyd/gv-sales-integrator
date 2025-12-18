@@ -15,6 +15,9 @@ def main() -> None:
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
 
+    # Validate configuration and fail fast if critical errors found
+    settings.validate_and_fail_fast()
+
     redis = get_redis_bytes()
     queue = Queue(name=settings.RQ_QUEUE_NAME, connection=redis)
     worker = Worker([queue], connection=redis)
