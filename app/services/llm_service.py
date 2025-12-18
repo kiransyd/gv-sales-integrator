@@ -83,7 +83,7 @@ def _extract_json_object(text: str) -> str:
     We still enforce strict validation after parsing.
     """
     s = text.strip()
-    
+
     # Remove markdown code blocks
     if s.startswith("```"):
         # Find the closing ```
@@ -95,14 +95,35 @@ def _extract_json_object(text: str) -> str:
                 s = s[4:].strip()
             elif s.startswith("JSON"):
                 s = s[4:].strip()
-    
-    # Extract JSON object
-    if s.startswith("{") and s.endswith("}"):
-        return s
+
+    # Clean up any remaining whitespace
+    s = s.strip()
+
+    # Extract JSON object - find matching braces
     start = s.find("{")
+    if start < 0:
+        return s
+
+    # Find the matching closing brace by counting
+    brace_count = 0
+    end = -1
+    for i in range(start, len(s)):
+        if s[i] == "{":
+            brace_count += 1
+        elif s[i] == "}":
+            brace_count -= 1
+            if brace_count == 0:
+                end = i
+                break
+
+    if end > start:
+        return s[start : end + 1]
+
+    # Fallback to rfind if brace matching failed
     end = s.rfind("}")
     if start >= 0 and end > start:
         return s[start : end + 1]
+
     return s
 
 
