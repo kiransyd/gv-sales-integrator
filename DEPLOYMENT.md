@@ -5,7 +5,7 @@
 Use the dev compose file for hot reload:
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build
+docker compose -f docker-compose.dev.yaml up --build
 ```
 
 ## Production Deployment (Coolify)
@@ -29,7 +29,7 @@ git push origin master
 ### 3. Configure Coolify
 
 **Compose File:**
-- Coolify will automatically detect `docker-compose.yml`
+- Coolify will automatically detect `docker-compose.yaml`
 - Make sure it's building all 3 services: `redis`, `api`, `worker`
 
 **Environment Variables:**
