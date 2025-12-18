@@ -41,7 +41,7 @@ def _call_gemini(*, system: str, user: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": user}]}],
         "generationConfig": {
             "temperature": 0.3,  # Slightly higher for more thorough extraction
-            "maxOutputTokens": 4096,  # Increased to allow more detailed extraction
+            "maxOutputTokens": 8192,  # Increased to ensure all fields complete
         },
     }
 
@@ -63,8 +63,15 @@ def _call_gemini(*, system: str, user: str) -> str:
 
     elapsed = time.time() - start_time
     try:
-        result = body["candidates"][0]["content"]["parts"][0]["text"]
-        logger.info("✅ Gemini LLM response received. elapsed=%.2fs response_len=%d", elapsed, len(result))
+        candidate = body["candidates"][0]
+        result = candidate["content"]["parts"][0]["text"]
+        finish_reason = candidate.get("finishReason", "UNKNOWN")
+        logger.info("✅ Gemini LLM response received. elapsed=%.2fs response_len=%d finish_reason=%s", elapsed, len(result), finish_reason)
+
+        # Warn if response was truncated
+        if finish_reason != "STOP":
+            logger.warning("⚠️  Gemini response may be incomplete. finish_reason=%s", finish_reason)
+
         # Log full response for debugging (important for diagnosing empty fields)
         if len(result) > 2000:
             logger.info("LLM response (first 1000 chars): %s...", result[:1000])
@@ -324,9 +331,9 @@ def calendly_lead_intel(*, calendly_payload_subset: dict[str, Any]) -> BaseModel
         "- Extract industry from answers if mentioned (e.g., \"Marketing\", \"Technology\", \"Healthcare\", \"Manufacturing\")\n"
         "- Extract referred_by from answers about how they heard about us (e.g., \"Search engine (Google, Bing)\", \"LinkedIn\", \"Referral from John\", etc.)\n"
         "- Extract phone number if mentioned in any Q&A answer (look for phone patterns like +1-xxx-xxx-xxxx, (xxx) xxx-xxxx, etc.)\n"
-        "- Generate recommended_discovery_questions based on gaps in the information (e.g., questions about budget, timeline, decision makers)\n"
-        "- Generate demo_focus_recommendations based on their pain points and objectives (e.g., \"Focus on approval workflows and comment management\")\n"
-        "- Create sales_rep_cheat_sheet summarizing key facts: company type, team size, pain points, tools, objectives in a concise format\n\n"
+        "- Generate recommended_discovery_questions: 3-4 concise questions (max 2 lines per question) based on gaps in the information\n"
+        "- Generate demo_focus_recommendations: 2-3 concise bullet points based on pain points and objectives\n"
+        "- Create sales_rep_cheat_sheet: Brief summary (max 4-5 lines) of key facts for the sales rep\n\n"
         "### DATETIME RULES:\n"
         "- demo_datetime_utc must be ISO 8601 UTC with Z suffix (use the start_time exactly)\n"
         "- demo_datetime_local must be human-readable format: \"Wed, 16 Dec 2025 at 2:30 PM PST\" (use timezone to convert)\n\n"
