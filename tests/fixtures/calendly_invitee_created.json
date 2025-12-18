@@ -1,0 +1,25 @@
+{
+  "event": "invitee.created",
+  "payload": {
+    "invitee": {
+      "email": "alice@example.com",
+      "name": "Alice Smith",
+      "uri": "https://api.calendly.com/scheduled_events/evt-123/invitees/inv-123",
+      "uuid": "inv-123"
+    },
+    "event": {
+      "uri": "https://api.calendly.com/scheduled_events/evt-123",
+      "uuid": "evt-123",
+      "start_time": "2025-12-17T10:00:00Z",
+      "timezone": "Australia/Sydney"
+    },
+    "questions_and_answers": [
+      { "question": "Company?", "answer": "Acme" },
+      { "question": "Use case?", "answer": "Client proofing" }
+    ],
+    "event_type": "https://api.calendly.com/event_types/123"
+  }
+}
+
+
+

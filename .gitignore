@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+self_client.json
+self_client*.json
+zoho_leads_fields.txt
+calendly_webhook_subscription*.json
+
+

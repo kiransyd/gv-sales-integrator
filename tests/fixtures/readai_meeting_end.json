@@ -1,0 +1,36 @@
+{
+  "session_id": "sess-123",
+  "trigger": "meeting_end",
+  "title": "GoVisually Demo",
+  "start_time": "2025-12-17T10:00:00Z",
+  "end_time": "2025-12-17T10:30:00Z",
+  "participants": [
+    { "name": "GV Rep", "email": "rep@govisually.com" },
+    { "name": "Alice Smith", "email": "alice@example.com" }
+  ],
+  "owner": { "name": "GV Rep", "email": "rep@govisually.com" },
+  "summary": "Discussed collaboration workflow and approval processes.",
+  "action_items": [{ "text": "Send pricing" }],
+  "key_questions": [{ "text": "Can you support multi-team approvals?" }],
+  "topics": [{ "text": "Approvals" }, { "text": "Collaboration" }],
+  "report_url": "https://app.read.ai/analytics/meetings/sess-123",
+  "transcript": {
+    "speakers": [{ "name": "Alice Smith" }, { "name": "GV Rep" }],
+    "speaker_blocks": [
+      {
+        "start_time": "1719514000000",
+        "end_time": "1719514001000",
+        "speaker": { "name": "Alice Smith" },
+        "words": "We need faster approvals."
+      },
+      {
+        "start_time": "1719514002000",
+        "end_time": "1719514003000",
+        "speaker": { "name": "GV Rep" },
+        "words": "GoVisually can help."
+      }
+    ]
+  }
+}
+
+
