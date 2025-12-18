@@ -38,8 +38,9 @@ git push origin master
 - Paste into Coolify's "Environment Variables" section
 
 **Port Mapping:**
-- Coolify will expose port 8000 from the `api` service
-- Map it to your domain (e.g., `your-domain.com` → `api:8000`)
+- The `api` service exposes port 8000 internally
+- Coolify automatically handles port mapping through its reverse proxy
+- Configure your domain in Coolify to route to the `api` service on port 8000
 
 ### 4. Deploy
 
