@@ -150,6 +150,7 @@ def generate_strict_json(
     
     raw1 = _call_gemini(system=system_prompt, user=user_prompt)
     json1 = _extract_json_object(raw1)
+    logger.debug("Extracted JSON (first %d chars): %s", len(json1), json1[:500] if len(json1) > 500 else json1)
     try:
         obj1 = json.loads(json1)
         # Handle case where LLM wraps response in "properties" or other wrapper keys
@@ -191,7 +192,7 @@ def generate_strict_json(
         fix_user = (
             "Fix this JSON to match the schema exactly. Output JSON only.\n\n"
             f"Validation errors:\n{_truncate(str(e1))}\n\n"
-            f"Invalid JSON:\n{_truncate(json1)}"
+            f"Invalid JSON:\n{json1}"  # Don't truncate JSON - LLM needs complete data to repair
         )
         attempt2_start = time.time()
         raw2 = _call_gemini(system=fix_system, user=fix_user)
