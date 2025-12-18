@@ -312,7 +312,7 @@ def upload_lead_photo(lead_id: str, image_data: bytes, filename: str = "logo.png
         return False
 
     try:
-        # Get access token
+        # Get access token (returns string directly)
         token = get_access_token()
 
         # Build URL
@@ -320,7 +320,7 @@ def upload_lead_photo(lead_id: str, image_data: bytes, filename: str = "logo.png
 
         # Prepare multipart form data
         files = {"file": (filename, image_data, "image/png")}
-        headers = {"Authorization": f"Zoho-oauthtoken {token.access_token}"}
+        headers = {"Authorization": f"Zoho-oauthtoken {token}"}
 
         logger.info("📷 Uploading photo to Zoho Lead %s (%d bytes)", lead_id, len(image_data))
 
