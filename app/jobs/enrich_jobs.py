@@ -105,27 +105,43 @@ def _build_enrichment_note(enrichment: EnrichmentResult) -> str:
     # Website intelligence
     if enrichment.website_intelligence:
         web = enrichment.website_intelligence
-        lines.append("🌐 WEBSITE INTELLIGENCE (AI Analysis)")
-        if web.value_proposition:
-            lines.append(f"• Value Prop: {web.value_proposition}")
-        if web.target_market:
-            lines.append(f"• Target Market: {web.target_market}")
-        if web.products_services:
-            lines.append(f"• Products/Services: {web.products_services}")
-        if web.pricing_model:
-            lines.append(f"• Pricing Model: {web.pricing_model}")
-        if web.recent_news:
-            lines.append(f"• Recent News: {web.recent_news}")
-        if web.growth_signals:
-            lines.append(f"• Growth Signals: {web.growth_signals}")
-        if web.key_pain_points:
-            lines.append(f"• Key Pain Points: {web.key_pain_points}")
-        if web.competitors_mentioned:
-            lines.append(f"• Competitors Mentioned: {web.competitors_mentioned}")
+        lines.append("🌐 WEBSITE RESEARCH")
         lines.append("")
+        if web.value_proposition:
+            lines.append(f"What they do:")
+            lines.append(web.value_proposition)
+            lines.append("")
+        if web.target_market:
+            lines.append(f"Who they sell to:")
+            lines.append(web.target_market)
+            lines.append("")
+        if web.products_services:
+            lines.append(f"Their products/services:")
+            lines.append(web.products_services)
+            lines.append("")
+        if web.pricing_model:
+            lines.append(f"Pricing:")
+            lines.append(web.pricing_model)
+            lines.append("")
+        if web.recent_news:
+            lines.append(f"📰 What's new:")
+            lines.append(web.recent_news)
+            lines.append("")
+        if web.growth_signals:
+            lines.append(f"🚀 Growth signals:")
+            lines.append(web.growth_signals)
+            lines.append("")
+        if web.key_pain_points:
+            lines.append(f"Their customers' pain points:")
+            lines.append(web.key_pain_points)
+            lines.append("")
+        if web.competitors_mentioned:
+            lines.append(f"Competitors they mention:")
+            lines.append(web.competitors_mentioned)
+            lines.append("")
 
         if web.sales_insights:
-            lines.append("🎯 SALES INSIGHTS")
+            lines.append("🎯 HOW TO APPROACH THIS DEMO")
             lines.append(web.sales_insights)
             lines.append("")
 

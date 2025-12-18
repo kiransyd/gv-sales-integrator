@@ -157,29 +157,32 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
     logger.info("Analyzing website content with LLM (%d chars)", len(combined_text))
 
     system_prompt = (
-        "You are a B2B sales intelligence analyst. Your task is to analyze a company's website "
-        "and extract key sales insights to help a sales rep prepare for a demo call. "
-        "Be concise, factual, and focus on actionable intelligence."
+        "You are a friendly, sharp B2B sales rep at GoVisually who just spent 10 minutes researching this company's website. "
+        "You're sharing your findings with your teammate who's about to hop on a demo call with them. "
+        "Write like you're talking to a colleague - casual, conversational, actionable. "
+        "Focus on what matters for the demo: their business, their likely pain points, and how GoVisually can help."
     )
 
-    user_prompt = f"""Analyze this company website content and extract sales intelligence:
+    user_prompt = f"""I just researched this company's website. Here's what I found:
 
 {combined_text}
 
-Extract the following information in JSON format. If information is not available, use empty string "".
+Write me some quick intel notes in JSON format. Keep it real and conversational - like you're briefing a teammate, not writing a report.
 
 Return ONLY valid JSON with these exact keys:
 {{
-  "value_proposition": "What is their main value proposition? (1-2 sentences)",
-  "target_market": "Who are their target customers? (e.g., 'Mid-market B2B SaaS companies')",
-  "products_services": "What products/services do they offer? (brief list)",
-  "pricing_model": "What is their pricing model if mentioned? (e.g., 'Tiered SaaS $99-$499/mo')",
-  "recent_news": "Any recent news, product launches, or announcements? (if found)",
-  "growth_signals": "Any hiring, funding, or expansion signals? (e.g., 'Hiring 5 engineers')",
-  "key_pain_points": "What pain points do they mention solving for their customers?",
-  "competitors_mentioned": "Any competitors they mention or compare against?",
-  "sales_insights": "Top 3 insights for a sales rep (e.g., 'Focus on enterprise features', 'Emphasize ROI tracking')"
+  "value_proposition": "What's their main thing? What do they do? (1-2 casual sentences)",
+  "target_market": "Who do they sell to? (conversational, e.g., 'Looks like they work with mid-market tech companies')",
+  "products_services": "What are they selling? (brief, human-readable)",
+  "pricing_model": "Any pricing info on the site? (if found, otherwise empty)",
+  "recent_news": "Anything new happening? Product launches, partnerships, etc.? (if found, keep it brief)",
+  "growth_signals": "Are they hiring? Expanding? Growing fast? (e.g., 'Hiring a bunch of engineers - looks like they're scaling')",
+  "key_pain_points": "What problems are they solving for THEIR customers? (helps us understand their world)",
+  "competitors_mentioned": "Do they call out any competitors? (if found)",
+  "sales_insights": "3-4 bullet points on how to approach this demo. What should we focus on? What will resonate? (Be specific and actionable. Examples: 'They're in packaging/CPG - lead with our proofing workflow', 'Remote team across 3 offices - emphasize async collaboration', 'Using Adobe/Figma - show our integrations')"
 }}
+
+Keep it short, punchy, and useful. If you don't find something, just use empty string "".
 
 Output JSON only, no markdown or explanation."""
 
