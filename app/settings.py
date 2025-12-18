@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     SCRAPER_API_KEY: str = Field(default="")
     SCRAPER_MAX_PAGES: int = Field(default=5)
 
+    # BrandFetch API (for company logos)
+    BRAND_FETCH_API: str = Field(default="")
+    BRAND_FETCH_CLIENT_ID: str = Field(default="")
+
     # Enrichment Settings
     ENABLE_AUTO_ENRICH_CALENDLY: bool = Field(default=False)
     ENABLE_WEBSITE_SCRAPING: bool = Field(default=True)

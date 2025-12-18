@@ -284,6 +284,68 @@ def create_note(lead_id: str, note_title: str, note_content: str) -> None:
     _request("POST", "/Notes", json_body={"data": [payload]})
 
 
+def upload_lead_photo(lead_id: str, image_data: bytes, filename: str = "logo.png") -> bool:
+    """
+    Upload a photo to a Zoho Lead record.
+
+    Args:
+        lead_id: Zoho Lead record ID
+        image_data: Image file bytes (PNG, JPEG, JPG, GIF, BMP)
+        filename: Optional filename (default: "logo.png")
+
+    Returns:
+        bool: True if upload succeeded, False otherwise
+
+    Note:
+        - Max file size: 10 MB
+        - Supported formats: PNG, JPEG, JPG, GIF, BMP
+        - Endpoint: POST /crm/v2/Leads/{lead_id}/photo
+    """
+    settings = get_settings()
+    if settings.DRY_RUN:
+        logger.info("DRY_RUN Zoho upload_lead_photo: lead_id=%s size=%d bytes", lead_id, len(image_data))
+        return True
+
+    # Validate size (10 MB Zoho limit)
+    if len(image_data) > 10 * 1024 * 1024:
+        logger.warning("Image too large (%d bytes) - Zoho limit is 10 MB", len(image_data))
+        return False
+
+    try:
+        # Get access token
+        token = get_access_token()
+
+        # Build URL
+        url = f"{_api_base()}/{settings.ZOHO_LEADS_MODULE}/{lead_id}/photo"
+
+        # Prepare multipart form data
+        files = {"file": (filename, image_data, "image/png")}
+        headers = {"Authorization": f"Zoho-oauthtoken {token.access_token}"}
+
+        logger.info("📷 Uploading photo to Zoho Lead %s (%d bytes)", lead_id, len(image_data))
+
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(url, files=files, headers=headers)
+            resp.raise_for_status()
+            result = resp.json()
+
+        # Check response
+        status = result.get("status", "unknown")
+        if status == "success":
+            logger.info("✅ Photo uploaded successfully to Lead %s", lead_id)
+            return True
+        else:
+            logger.warning("⚠️  Photo upload failed. status=%s response=%s", status, result)
+            return False
+
+    except httpx.HTTPStatusError as e:
+        logger.warning("Zoho photo upload failed for Lead %s: HTTP %d - %s", lead_id, e.response.status_code, e.response.text[:200])
+        return False
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to upload photo to Lead %s: %s", lead_id, e)
+        return False
+
+
 def create_task(
     *,
     lead_id: str,

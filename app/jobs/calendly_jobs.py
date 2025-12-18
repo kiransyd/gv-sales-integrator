@@ -52,6 +52,17 @@ def _auto_enrich_lead(email: str, lead_id: str) -> None:
         note_content = _build_enrichment_note(enrichment)
         create_note(lead_id, note_title, note_content)
 
+        # Fetch and upload company logo (best effort)
+        from app.util.text_format import extract_domain_from_email
+        from app.services.brandfetch_service import fetch_company_logo
+        from app.services.zoho_service import upload_lead_photo
+
+        domain = extract_domain_from_email(email)
+        if domain:
+            logo_data = fetch_company_logo(domain)
+            if logo_data:
+                upload_lead_photo(lead_id, logo_data, filename=f"{domain}_logo.png")
+
         logger.info("Auto-enrichment complete for: %s (%d sources)", email, len(enrichment.data_sources))
 
     except Exception as e:  # noqa: BLE001

@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 from app.jobs.retry import JobContext, run_event_job
 from app.schemas.apollo import EnrichmentResult
 from app.services.apollo_service import ApolloTransientError, enrich_company, enrich_person
+from app.services.brandfetch_service import fetch_company_logo
 from app.services.event_store_service import load_event
 from app.services.scraper_service import ScraperTransientError, scrape_website
-from app.services.zoho_service import create_note, find_lead_by_email, update_lead
+from app.services.zoho_service import create_note, find_lead_by_email, update_lead, upload_lead_photo
 from app.settings import get_settings
 from app.util.text_format import extract_domain_from_email
 
