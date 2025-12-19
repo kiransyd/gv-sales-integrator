@@ -108,7 +108,7 @@ def _extract_tags_from_payload(payload: dict) -> list[str]:
 
 def _process_contact_tagged(ctx: JobContext) -> None:
     """
-    Process Intercom contact.tag.created event.
+    Process Intercom contact.lead.tag.created or contact.user.tag.created event.
 
     1. Parse contact information from payload
     2. Check if contact has qualifying tags
@@ -187,6 +187,6 @@ def _process_contact_tagged(ctx: JobContext) -> None:
 
 def process_intercom_contact_tagged(event_id: str) -> None:
     """
-    Entry point for RQ job: process Intercom contact.tag.created event.
+    Entry point for RQ job: process Intercom contact.lead.tag.created or contact.user.tag.created event.
     """
     run_event_job(event_id, _process_contact_tagged)

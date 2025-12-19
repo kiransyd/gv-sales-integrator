@@ -43,15 +43,15 @@ def generate_intercom_signature(payload_bytes: bytes, secret: str) -> str:
 
 def create_intercom_payload():
     """
-    Create realistic Intercom contact.tag.created webhook payload.
+    Create realistic Intercom contact.user.tag.created webhook payload.
 
-    This simulates what Intercom sends when a contact is tagged with "Lead".
+    This simulates what Intercom sends when a user/contact is tagged with "Lead".
     """
     created_at = int(time.time())
 
     return {
         "type": "notification_event",
-        "topic": "contact.tag.created",
+        "topic": "contact.user.tag.created",
         "created_at": created_at,
         "data": {
             "type": "notification_event_data",

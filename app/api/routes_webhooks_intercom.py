@@ -56,7 +56,7 @@ def verify_intercom_signature(
 async def intercom_webhook(request: Request, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """
     Handle Intercom webhooks.
-    Currently supports: contact.tag.created
+    Currently supports: contact.lead.tag.created, contact.user.tag.created
     """
     raw = await request.body()
 
@@ -83,9 +83,10 @@ async def intercom_webhook(request: Request, settings: Settings = Depends(get_se
 
     logger.debug("Intercom webhook: topic=%s, created_at=%s", topic, created_at)
 
-    # Currently only support contact.tag.created
-    if topic != "contact.tag.created":
-        logger.info("Intercom webhook ignored: unsupported topic=%s", topic)
+    # Support both contact.lead.tag.created and contact.user.tag.created
+    supported_topics = ["contact.lead.tag.created", "contact.user.tag.created"]
+    if topic not in supported_topics:
+        logger.info("Intercom webhook ignored: unsupported topic=%s (supported: %s)", topic, supported_topics)
         return {"ok": True, "ignored": True, "reason": "unsupported_topic", "topic": topic}
 
     # Extract contact ID and tag info for idempotency
@@ -140,7 +141,7 @@ async def intercom_webhook(request: Request, settings: Settings = Depends(get_se
     # Build idempotency key
     # Use contact_id + created_at to ensure uniqueness (a contact can be tagged multiple times)
     external_id = f"{contact_id}:{created_at}"
-    idem_key = f"intercom:contact.tag.created:{external_id}"
+    idem_key = f"intercom:{topic}:{external_id}"
     event_id = new_event_id()
 
     acquired = try_acquire_idempotency_key(idempotency_key=idem_key, event_id=event_id)
@@ -150,13 +151,13 @@ async def intercom_webhook(request: Request, settings: Settings = Depends(get_se
     store_incoming_event(
         event_id=event_id,
         source="intercom",
-        event_type="contact.tag.created",
+        event_type=topic,
         external_id=external_id,
         idempotency_key=idem_key,
         payload=payload,
     )
 
-    # Enqueue job
+    # Enqueue job - same handler for both lead and user tags
     func = "app.jobs.intercom_jobs.process_intercom_contact_tagged"
 
     try:
