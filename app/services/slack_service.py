@@ -253,6 +253,8 @@ def notify_support_qualified(
     company: str,
     tags: list[str],
     lead_id: Optional[str] = None,
+    location: Optional[str] = None,
+    plan_type: Optional[str] = None,
 ) -> None:
     """Send notification when an Intercom contact is qualified for sales."""
     tags_text = ", ".join(tags) if tags else "N/A"
@@ -262,6 +264,15 @@ def notify_support_qualified(
         {"title": "Company", "value": company or "N/A"},
         {"title": "Qualifying Tags", "value": tags_text},
     ]
+
+    # Add location if available
+    if location:
+        fields.append({"title": "Location", "value": location})
+
+    # Add plan type if available (valuable context)
+    if plan_type:
+        fields.append({"title": "Plan Type", "value": plan_type})
+
     if lead_id:
         fields.append({"title": "Zoho Lead ID", "value": lead_id})
 

@@ -92,8 +92,16 @@ def _extract_tags_from_payload(payload: dict) -> list[str]:
     data = payload.get("data", {})
     item = data.get("item", {})
 
-    # Tags might be in different locations
-    tags_obj = item.get("tags")
+    # Check if this is the new structure with contact_tag
+    item_type = item.get("type", "")
+    if item_type == "contact_tag":
+        # Tags are in item.contact.tags
+        contact = item.get("contact", {})
+        tags_obj = contact.get("tags")
+    else:
+        # Tags are directly in item.tags (fallback)
+        tags_obj = item.get("tags")
+
     if isinstance(tags_obj, dict):
         tags_list = tags_obj.get("data", [])
         if isinstance(tags_list, list):
@@ -172,6 +180,19 @@ def _process_contact_tagged(ctx: JobContext) -> None:
     create_note(lead_id, note_title, note_content)
     logger.info("Created note in Zoho lead %s", lead_id)
 
+    # Build location string for Slack
+    location_parts = []
+    if info.city:
+        location_parts.append(info.city)
+    if info.region:
+        location_parts.append(info.region)
+    if info.country:
+        location_parts.append(info.country)
+    location_str = ", ".join(location_parts) if location_parts else None
+
+    # Get plan type from custom attributes
+    plan_type = info.custom_attributes.get("plan_type") if info.custom_attributes else None
+
     # Send Slack notification
     notify_support_qualified(
         email=info.email,
@@ -179,6 +200,8 @@ def _process_contact_tagged(ctx: JobContext) -> None:
         company=info.company_name or "",
         tags=matched_tags,
         lead_id=lead_id,
+        location=location_str,
+        plan_type=plan_type,
     )
 
     # Auto-enrich lead with Apollo + Website intelligence (if enabled)

@@ -56,48 +56,56 @@ def create_intercom_payload():
         "data": {
             "type": "notification_event_data",
             "item": {
-                "type": "contact",
-                "id": "67890abcdef12345",
-                "external_id": "",
-                "email": TEST_CONTACT["email"],
-                "name": TEST_CONTACT["name"],
-                "phone": TEST_CONTACT["phone"],
-                "custom_attributes": {
-                    "source": "Website Chat",
-                    "initial_inquiry": "Interested in video collaboration tools",
-                    "conversations": 3,
+                "type": "contact_tag",
+                "tag": {
+                    "type": "tag",
+                    "id": "tag_lead_001",
+                    "name": "Lead"
                 },
-                "companies": {
-                    "type": "list",
-                    "data": [
-                        {
-                            "type": "company",
-                            "id": "company_12345xyz",
-                            "name": TEST_CONTACT["company"],
-                            "website": TEST_CONTACT["company_website"],
-                            "company_id": "craftbrew_io",
-                            "size": TEST_CONTACT["company_size"],
-                            "industry": TEST_CONTACT["company_industry"],
-                        }
-                    ]
-                },
-                "tags": {
-                    "type": "list",
-                    "data": [
-                        {
-                            "type": "tag",
-                            "id": "tag_lead_001",
-                            "name": "Lead"
-                        },
-                        {
-                            "type": "tag",
-                            "id": "tag_hot_002",
-                            "name": "Hot"
-                        }
-                    ]
-                },
-                "created_at": created_at - 86400,  # Contact created 1 day ago
-                "updated_at": created_at,
+                "contact": {
+                    "type": "contact",
+                    "id": "67890abcdef12345",
+                    "external_id": "",
+                    "email": TEST_CONTACT["email"],
+                    "name": TEST_CONTACT["name"],
+                    "phone": TEST_CONTACT["phone"],
+                    "custom_attributes": {
+                        "source": "Website Chat",
+                        "initial_inquiry": "Interested in video collaboration tools",
+                        "conversations": 3,
+                    },
+                    "companies": {
+                        "type": "list",
+                        "data": [
+                            {
+                                "type": "company",
+                                "id": "company_12345xyz",
+                                "name": TEST_CONTACT["company"],
+                                "website": TEST_CONTACT["company_website"],
+                                "company_id": "craftbrew_io",
+                                "size": TEST_CONTACT["company_size"],
+                                "industry": TEST_CONTACT["company_industry"],
+                            }
+                        ]
+                    },
+                    "tags": {
+                        "type": "list",
+                        "data": [
+                            {
+                                "type": "tag",
+                                "id": "tag_lead_001",
+                                "name": "Lead"
+                            },
+                            {
+                                "type": "tag",
+                                "id": "tag_hot_002",
+                                "name": "Hot"
+                            }
+                        ]
+                    },
+                    "created_at": created_at - 86400,  # Contact created 1 day ago
+                    "updated_at": created_at,
+                }
             }
         }
     }

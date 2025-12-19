@@ -92,26 +92,33 @@ async def intercom_webhook(request: Request, settings: Settings = Depends(get_se
     # Extract contact ID and tag info for idempotency
     data = payload.get("data", {})
     item = data.get("item", {})
-    contact_id = item.get("id", "")
 
-    # Extract tag from the event
-    # For contact.tag.created, the tag is in data.item (the contact) under tags
-    # But we need to know which tag was just added - Intercom sends this in notification
-    # Let's check if there's a tag object in the payload
-    tag_name = ""
+    # The actual structure has item.type = "contact_tag" with nested contact and tag
+    item_type = item.get("type", "")
 
-    # Try to find tag in various possible locations
-    if "tag" in item:
+    if item_type == "contact_tag":
+        # New structure: item.contact and item.tag
+        contact = item.get("contact", {})
+        contact_id = contact.get("id", "")
         tag_obj = item.get("tag", {})
-        if isinstance(tag_obj, dict):
-            tag_name = tag_obj.get("name", "")
-    elif "tags" in item:
-        tags_data = item.get("tags", {})
-        if isinstance(tags_data, dict):
-            tags_list = tags_data.get("data", [])
-            if isinstance(tags_list, list) and len(tags_list) > 0:
-                # Use the first tag (or most recent)
-                tag_name = tags_list[0].get("name", "") if isinstance(tags_list[0], dict) else ""
+        tag_name = tag_obj.get("name", "") if isinstance(tag_obj, dict) else ""
+    else:
+        # Fallback: old structure where item is the contact directly
+        contact_id = item.get("id", "")
+        tag_name = ""
+
+        # Try to find tag in various possible locations
+        if "tag" in item:
+            tag_obj = item.get("tag", {})
+            if isinstance(tag_obj, dict):
+                tag_name = tag_obj.get("name", "")
+        elif "tags" in item:
+            tags_data = item.get("tags", {})
+            if isinstance(tags_data, dict):
+                tags_list = tags_data.get("data", [])
+                if isinstance(tags_list, list) and len(tags_list) > 0:
+                    # Use the first tag (or most recent)
+                    tag_name = tags_list[0].get("name", "") if isinstance(tags_list[0], dict) else ""
 
     if not contact_id:
         logger.error("Intercom webhook: Missing contact ID. payload_keys=%s", list(payload.keys()))

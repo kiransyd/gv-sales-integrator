@@ -31,33 +31,55 @@ class IntercomContactInfo:
     company_website: str
     company_size: int | None
     company_industry: str
+    # Location data
+    country: str
+    city: str
+    region: str
+    # Device/browser info
+    browser: str
+    os: str
+    # Intercom metadata
+    intercom_url: str
+    signed_up_at: str
+    last_seen_at: str
 
 
 def parse_intercom_contact_info(payload: dict[str, Any]) -> IntercomContactInfo:
     """
     Extract contact information from Intercom webhook payload.
 
-    Expected structure for contact.tag.created:
+    Expected structure for contact.user.tag.created / contact.lead.tag.created:
     {
         "type": "notification_event",
-        "topic": "contact.tag.created",
+        "topic": "contact.user.tag.created",
         "data": {
             "item": {
-                "type": "contact",
-                "id": "...",
-                "email": "...",
-                "name": "...",
-                "phone": "...",
-                "external_id": "...",
-                "custom_attributes": {...},
-                "companies": {
-                    "data": [...]
+                "type": "contact_tag",
+                "tag": {...},
+                "contact": {
+                    "type": "contact",
+                    "id": "...",
+                    "email": "...",
+                    "name": "...",
+                    "phone": "...",
+                    "external_id": "...",
+                    "custom_attributes": {...},
+                    "companies": {
+                        "data": [...]
+                    }
                 }
             }
         }
     }
     """
     item = _get(payload, "data", "item") or {}
+
+    # Check if this is the new structure with contact_tag
+    item_type = item.get("type", "")
+    if item_type == "contact_tag":
+        # Contact is nested under item.contact
+        item = item.get("contact", {})
+    # Otherwise, item is the contact directly (fallback)
 
     email = str(item.get("email") or "").strip()
     name = str(item.get("name") or "").strip()
@@ -89,6 +111,22 @@ def parse_intercom_contact_info(payload: dict[str, Any]) -> IntercomContactInfo:
         company_size = company.get("size")
         company_industry = str(company.get("industry") or "").strip()
 
+    # Extract location data
+    location = item.get("location") or {}
+    country = str(location.get("country") or "").strip()
+    city = str(location.get("city") or "").strip()
+    region = str(location.get("region") or "").strip()
+
+    # Extract device/browser info
+    browser = str(item.get("browser") or "").strip()
+    os = str(item.get("os") or "").strip()
+
+    # Intercom metadata
+    workspace_id = item.get("workspace_id", "")
+    intercom_url = f"https://app.intercom.com/a/apps/{workspace_id}/users/{contact_id}/all-conversations" if workspace_id and contact_id else ""
+    signed_up_at = str(item.get("signed_up_at") or "").strip()
+    last_seen_at = str(item.get("last_seen_at") or "").strip()
+
     return IntercomContactInfo(
         email=email,
         name=name,
@@ -102,6 +140,14 @@ def parse_intercom_contact_info(payload: dict[str, Any]) -> IntercomContactInfo:
         company_website=company_website,
         company_size=company_size,
         company_industry=company_industry,
+        country=country,
+        city=city,
+        region=region,
+        browser=browser,
+        os=os,
+        intercom_url=intercom_url,
+        signed_up_at=signed_up_at,
+        last_seen_at=last_seen_at,
     )
 
 
@@ -156,6 +202,40 @@ def build_zoho_lead_payload_for_intercom(
     if info.company_size:
         payload["No_of_Employees"] = info.company_size
 
+    # Location data
+    if info.country:
+        payload["Country"] = info.country
+    if info.city:
+        payload["City"] = info.city
+    if info.region:
+        payload["State"] = info.region
+
+    # Extract valuable custom attributes
+    if info.custom_attributes:
+        # GoVisually-specific fields that sales reps care about
+        plan_type = info.custom_attributes.get("plan_type", "")
+        if plan_type:
+            payload["Description"] = payload.get("Description", "") + f"\nPlan Type: {plan_type}"
+
+        gv_version = info.custom_attributes.get("gv_version", "")
+        if gv_version:
+            payload["Description"] = payload.get("Description", "") + f"\nGoVisually Version: {gv_version}"
+
+        user_type = info.custom_attributes.get("user_type", "")
+        if user_type:
+            payload["Description"] = payload.get("Description", "") + f"\nUser Type: {user_type}"
+
+        # Tools being used (valuable competitive intel)
+        pm_tool = info.custom_attributes.get("project_management_tool_used", "")
+        proofing_tool = info.custom_attributes.get("proofing_tool_used", "")
+        if pm_tool or proofing_tool:
+            tools_info = []
+            if pm_tool:
+                tools_info.append(f"PM Tool: {pm_tool}")
+            if proofing_tool:
+                tools_info.append(f"Proofing Tool: {proofing_tool}")
+            payload["Description"] = payload.get("Description", "") + f"\n{', '.join(tools_info)}"
+
     if settings.ZOHO_OWNER_ID:
         payload["Owner"] = {"id": settings.ZOHO_OWNER_ID}
 
@@ -176,12 +256,46 @@ def format_intercom_note_content(
     parts = []
 
     parts.append("## Intercom Contact Qualified")
-    parts.append(f"**Contact ID:** {info.contact_id}")
+
+    # Intercom link (clickable)
+    if info.intercom_url:
+        parts.append(f"[View in Intercom]({info.intercom_url})")
+
+    parts.append(f"\n**Contact ID:** {info.contact_id}")
     if info.external_id:
         parts.append(f"**External ID:** {info.external_id}")
 
     parts.append(f"\n**Qualifying Tags:** {', '.join(tags)}")
 
+    # Engagement metrics
+    if info.signed_up_at or info.last_seen_at:
+        parts.append("\n### Engagement")
+        if info.signed_up_at:
+            parts.append(f"**Signed Up:** {info.signed_up_at}")
+        if info.last_seen_at:
+            parts.append(f"**Last Seen:** {info.last_seen_at}")
+
+    # Location
+    if info.country or info.city or info.region:
+        parts.append("\n### Location")
+        location_parts = []
+        if info.city:
+            location_parts.append(info.city)
+        if info.region:
+            location_parts.append(info.region)
+        if info.country:
+            location_parts.append(info.country)
+        parts.append(", ".join(location_parts))
+
+    # Device/Browser info
+    if info.browser or info.os:
+        parts.append("\n### Device Information")
+        if info.browser:
+            parts.append(f"**Browser:** {info.browser}")
+        if info.os:
+            parts.append(f"**OS:** {info.os}")
+
+    # Company information
     if info.company_name or info.company_website:
         parts.append("\n### Company Information")
         if info.company_name:
@@ -193,11 +307,42 @@ def format_intercom_note_content(
         if info.company_industry:
             parts.append(f"**Industry:** {info.company_industry}")
 
-    # Custom attributes
+    # GoVisually-specific custom attributes (highlighted)
     if info.custom_attributes:
-        parts.append("\n### Custom Attributes")
-        for key, value in info.custom_attributes.items():
+        parts.append("\n### GoVisually Usage")
+
+        # Highlight key fields
+        important_fields = {
+            "plan_type": "Plan Type",
+            "gv_version": "Version",
+            "user_type": "User Type",
+            "channel": "Initial Channel",
+            "main_goal": "Main Goal",
+            "job_role": "Job Role",
+        }
+
+        for key, label in important_fields.items():
+            value = info.custom_attributes.get(key)
             if value:
+                parts.append(f"**{label}:** {value}")
+
+        # Tools being used (competitive intel)
+        pm_tool = info.custom_attributes.get("project_management_tool_used")
+        proofing_tool = info.custom_attributes.get("proofing_tool_used")
+        if pm_tool or proofing_tool:
+            parts.append("\n### Tools Currently Using")
+            if pm_tool:
+                parts.append(f"**Project Management:** {pm_tool}")
+            if proofing_tool:
+                parts.append(f"**Proofing Tool:** {proofing_tool}")
+
+        # Other custom attributes
+        other_attrs = {k: v for k, v in info.custom_attributes.items()
+                       if k not in important_fields and k not in ["project_management_tool_used", "proofing_tool_used"] and v}
+
+        if other_attrs:
+            parts.append("\n### Other Attributes")
+            for key, value in other_attrs.items():
                 parts.append(f"**{key}:** {value}")
 
     return "\n".join(parts)
