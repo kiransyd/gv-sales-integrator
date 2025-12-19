@@ -94,9 +94,143 @@ Header: X-ReadAI-Secret
 - `GET /debug/info` - System info
 - `GET /debug/events/{event_id}` - Event details
 - `GET /debug/idem/{idempotency_key}` - Idempotency check
+- `GET /debug/status` - **Comprehensive system status dashboard** 🆕
 
 ### Health
 - `GET /healthz` - Health check
+
+## 📊 System Status Dashboard
+
+### `GET /debug/status`
+Comprehensive real-time system monitoring endpoint showing everything about your deployment.
+
+**Enable it:**
+```bash
+# In .env
+ALLOW_DEBUG_ENDPOINTS=true
+```
+
+**Access it:**
+```bash
+curl http://localhost:8000/debug/status | jq
+```
+
+**What it shows:**
+
+**1. Server Health**
+- Environment (dev/prod)
+- DRY_RUN mode status
+- Base URL configuration
+- Debug endpoints status
+
+**2. Redis Connection**
+- Connection status & ping
+- Redis version
+- Uptime, memory usage
+- Connected clients
+- Total commands processed
+- Keyspace info
+
+**3. Queue Metrics** ⭐
+- **Pending jobs** (waiting to be processed)
+- **Started jobs** (currently running)
+- **Finished jobs** (completed)
+- **Failed jobs** (with error details)
+- **Scheduled jobs** (future executions)
+- **Active job details** (function name, created_at, started_at)
+- **Recent failed jobs** (last 10 with error messages)
+
+**4. Worker Status** ⭐
+- Number of workers running
+- Worker names and states (idle, busy, suspended)
+- Current job being processed by each worker
+- Successful/failed job counts per worker
+- Worker birth dates (uptime)
+
+**5. Recent Activity**
+- Total events stored
+- Last 10 events with source, type, status, timestamp
+
+**6. Integration Status**
+- Zoho: configured, data center, dry_run
+- Apollo: configured
+- Gemini: configured, model name
+- BrandFetch: configured
+- Calendly: configured
+- Read.ai: configured
+- Website scraping: enabled, Crawl4AI + ScraperAPI status
+- Auto-enrichment: enabled
+
+**7. System Metrics**
+- CPU usage (%)
+- Memory usage (MB & %)
+- Number of threads
+- API uptime (seconds)
+
+**Example output:**
+```json
+{
+  "timestamp": "2025-12-19T10:30:00.000Z",
+  "server": {
+    "status": "healthy",
+    "environment": "prod",
+    "dry_run_mode": false
+  },
+  "redis": {
+    "status": "connected",
+    "version": "7.2.0",
+    "connected_clients": 3,
+    "used_memory_human": "2.5M"
+  },
+  "queue": {
+    "status": "healthy",
+    "counts": {
+      "pending": 5,
+      "started": 1,
+      "finished": 127,
+      "failed": 2,
+      "total": 6
+    },
+    "active_jobs": [
+      {
+        "id": "calendly:enrich:1234",
+        "func_name": "app.jobs.calendly_jobs.process_calendly_webhook",
+        "started_at": "2025-12-19T10:29:45.000Z"
+      }
+    ]
+  },
+  "workers": {
+    "status": "healthy",
+    "count": 1,
+    "workers": [
+      {
+        "name": "worker.1",
+        "state": "busy",
+        "successful_job_count": 127,
+        "failed_job_count": 2
+      }
+    ]
+  },
+  "integrations": {
+    "zoho": {"configured": true},
+    "apollo": {"configured": true},
+    "gemini": {"configured": true, "model": "gemini-1.5-pro"}
+  },
+  "system": {
+    "cpu_percent": 12.5,
+    "memory_mb": 245.3,
+    "uptime_seconds": 86400
+  }
+}
+```
+
+**Use cases:**
+- Monitor queue backlog (are jobs piling up?)
+- Check if workers are running (is the worker container alive?)
+- Debug failed jobs (what's causing failures?)
+- Monitor system resources (is memory spiking?)
+- Verify integration configuration (is Zoho configured?)
+- Track recent activity (what events came in recently?)
 
 ## 🧪 Testing
 
