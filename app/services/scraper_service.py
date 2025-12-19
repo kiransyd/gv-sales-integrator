@@ -222,7 +222,7 @@ Return ONLY valid JSON with these exact keys:
   "growth_signals": "Are they hiring? Expanding? Growing fast? (e.g., 'Hiring a bunch of engineers - looks like they're scaling')",
   "key_pain_points": "What problems are they solving for THEIR customers? (helps us understand their world)",
   "competitors_mentioned": "Do they call out any competitors? (if found)",
-  "sales_insights": "3-4 bullet points on how to approach this demo. What should we focus on? What will resonate? (Be specific and actionable. Examples: 'They're in packaging/CPG - lead with our proofing workflow', 'Remote team across 3 offices - emphasize async collaboration', 'Using Adobe/Figma - show our integrations')"
+  "sales_insights": "3-4 bullet points on how to approach this demo. What should we focus on? What will resonate? Return as a SINGLE STRING with newlines between bullets, NOT an array. (Examples: '• They're in packaging/CPG - lead with our proofing workflow\\n• Remote team across 3 offices - emphasize async collaboration\\n• Using Adobe/Figma - show our integrations')"
 }}
 
 Keep it short, punchy, and useful. If you don't find something, just use empty string "".
