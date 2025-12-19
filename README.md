@@ -106,9 +106,11 @@ Comprehensive real-time system monitoring endpoint showing everything about your
 
 **Enable it:**
 ```bash
-# In .env
+# In .env or .env.production
 ALLOW_DEBUG_ENDPOINTS=true
 ```
+
+**⚠️ Security Note:** This endpoint is protected and returns 404 when `ALLOW_DEBUG_ENDPOINTS=false` (default in production). Enable it temporarily when you need to debug, then disable it again.
 
 **Access it:**
 ```bash
