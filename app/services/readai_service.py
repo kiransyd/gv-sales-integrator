@@ -16,21 +16,74 @@ def customer_domains_set() -> set[str]:
     return {d.strip().lower() for d in settings.READAI_CUSTOMER_DOMAINS.split(",") if d.strip()}
 
 
+def _is_external_email(email: str) -> bool:
+    """
+    Check if an email is external (not internal/system).
+    Returns True if the email is external and should be considered for matching.
+    """
+    if not isinstance(email, str) or not email.strip():
+        return False
+
+    email_clean = email.strip().lower()
+    internal = customer_domains_set()
+
+    # Skip internal domains
+    if _domain(email_clean) in internal:
+        return False
+
+    # Skip Google Calendar resource/group emails
+    if email_clean.endswith("@group.calendar.google.com") or \
+       email_clean.endswith("@resource.calendar.google.com"):
+        return False
+
+    return True
+
+
+def get_all_external_attendee_emails(attendees: list[dict[str, Any]], owner: dict[str, Any]) -> list[str]:
+    """
+    Get all external attendee emails, prioritizing the meeting owner.
+
+    Returns:
+        List of external emails, with owner first (if external), followed by other external attendees.
+        Returns empty list if no external emails found.
+    """
+    emails: list[str] = []
+
+    # First, try to add the owner email (likely the Calendly booker)
+    owner_email = owner.get("email") if isinstance(owner, dict) else None
+    if owner_email and _is_external_email(owner_email):
+        emails.append(owner_email.strip().lower())
+
+    # Then add other external attendee emails
+    for a in attendees:
+        email = a.get("email")
+        if not email:
+            continue
+        email_clean = email.strip().lower()
+
+        # Skip if already added (owner) or not external
+        if email_clean in emails or not _is_external_email(email_clean):
+            continue
+
+        emails.append(email_clean)
+
+    return emails
+
+
 def select_best_external_attendee_email(attendees: list[dict[str, Any]]) -> str:
     """
     Deterministic selection:
     - requires email
     - excludes internal/customer domains from READAI_CUSTOMER_DOMAINS
+    - excludes Google Calendar resource/group emails
     - returns first external in input order
+
+    DEPRECATED: Use get_all_external_attendee_emails for better matching.
     """
-    internal = customer_domains_set()
     for a in attendees:
         email = a.get("email")
-        if not isinstance(email, str) or not email.strip():
-            continue
-        if _domain(email) in internal:
-            continue
-        return email.strip().lower()
+        if email and _is_external_email(email):
+            return email.strip().lower()
     return ""
 
 
@@ -60,6 +113,11 @@ def extract_readai_fields(payload: dict[str, Any]) -> dict[str, Any]:
         attendees = []
     attendees = [a for a in attendees if isinstance(a, dict)]
 
+    # Extract owner (the person who scheduled/owns the meeting)
+    owner = payload.get("owner")
+    if not isinstance(owner, dict):
+        owner = {}
+
     duration_min = payload.get("duration_minutes") or payload.get("duration_min") or payload.get("duration") or 0
     try:
         duration_min = int(duration_min)
@@ -80,6 +138,7 @@ def extract_readai_fields(payload: dict[str, Any]) -> dict[str, Any]:
         "summary": summary,
         "transcript": transcript,
         "attendees": attendees,
+        "owner": owner,
         "duration_minutes": duration_min,
         "recording_url": recording_url,
     }
@@ -135,7 +194,102 @@ def _transcript_to_text(transcript: Any) -> str:
     return "\n".join(lines).strip()
 
 
-def meddic_to_note_content(meddic: Any, *, recording_url: str = "") -> str:
+def _extract_attendee_summaries(
+    attendees: list[dict[str, Any]],
+    transcript_raw: Any,
+    owner: dict[str, Any],
+) -> str:
+    """
+    Extract attendee information and their key talking points from the transcript.
+    Returns a formatted string with attendee details.
+    """
+    if not attendees:
+        return ""
+
+    # Parse transcript to get speaker blocks
+    speaker_stats: dict[str, dict[str, Any]] = {}
+    if isinstance(transcript_raw, dict):
+        blocks = transcript_raw.get("speaker_blocks") or []
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                speaker = block.get("speaker") or {}
+                if not isinstance(speaker, dict):
+                    continue
+                name = str(speaker.get("name") or "").strip()
+                words = str(block.get("words") or "").strip()
+
+                if name and words:
+                    if name not in speaker_stats:
+                        speaker_stats[name] = {
+                            "statements": [],
+                            "word_count": 0,
+                        }
+                    # Store first few statements (up to 3) for context
+                    if len(speaker_stats[name]["statements"]) < 3:
+                        speaker_stats[name]["statements"].append(words)
+                    speaker_stats[name]["word_count"] += len(words.split())
+
+    # Build attendee list with details
+    lines: list[str] = []
+    internal = customer_domains_set()
+    owner_email = owner.get("email", "").strip().lower() if isinstance(owner, dict) else ""
+
+    for att in attendees:
+        email = att.get("email", "").strip()
+        name = att.get("name", "").strip()
+
+        if not email and not name:
+            continue
+
+        # Determine if internal/external
+        is_internal = email and _domain(email) in internal
+        role = "Internal" if is_internal else "External"
+
+        # Check if this is the meeting owner
+        is_owner = email.lower() == owner_email if email and owner_email else False
+        if is_owner:
+            role += " (Meeting Owner)"
+
+        # Build attendee info line
+        info_parts = []
+        if name:
+            info_parts.append(name)
+        if email:
+            info_parts.append(f"<{email}>")
+        info_parts.append(f"[{role}]")
+
+        lines.append("  • " + " ".join(info_parts))
+
+        # Add speaking stats if available
+        if name in speaker_stats:
+            stats = speaker_stats[name]
+            word_count = stats["word_count"]
+            lines.append(f"    - Spoke ~{word_count} words")
+
+            # Add first key statement as a sample
+            if stats["statements"]:
+                first_statement = stats["statements"][0]
+                # Truncate if too long
+                if len(first_statement) > 150:
+                    first_statement = first_statement[:150] + "..."
+                lines.append(f'    - Sample: "{first_statement}"')
+
+    if not lines:
+        return ""
+
+    return "\n".join(lines)
+
+
+def meddic_to_note_content(
+    meddic: Any,
+    *,
+    recording_url: str = "",
+    attendees: list[dict[str, Any]] | None = None,
+    transcript_raw: Any = None,
+    owner: dict[str, Any] | None = None,
+) -> str:
     def g(attr: str) -> str:
         return (getattr(meddic, attr, "") or "").strip()
 
@@ -150,6 +304,16 @@ def meddic_to_note_content(meddic: Any, *, recording_url: str = "") -> str:
             return
         lines.append(f"{title}:\n{body}".strip())
         lines.append("")
+
+    # Add attendee information at the top (after confidence)
+    if attendees:
+        attendee_summary = _extract_attendee_summaries(
+            attendees or [],
+            transcript_raw,
+            owner or {},
+        )
+        if attendee_summary:
+            section("Meeting Attendees", attendee_summary)
 
     section("Metrics", g("metrics"))
     section("Economic buyer", g("economic_buyer"))

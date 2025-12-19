@@ -135,13 +135,13 @@ def _process_created(ctx: JobContext) -> None:
     notify_demo_booked(
         email=info.email,
         name=info.name or "",
-        company=intel.company or "",
+        company=intel.company_name or "",
         demo_datetime=demo_dt_str,
         lead_id=lead_id,
     )
 
     # Auto-enrich lead with Apollo + Website intelligence (if enabled)
-    _auto_enrich_lead(info.email, lead_id, company=intel.company or "")
+    _auto_enrich_lead(info.email, lead_id, company=intel.company_name or "")
 
 
 def _process_canceled(ctx: JobContext) -> None:

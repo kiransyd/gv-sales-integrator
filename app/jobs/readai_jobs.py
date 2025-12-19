@@ -9,8 +9,8 @@ from app.services.llm_service import readai_meddic
 from app.services.readai_service import (
     build_zoho_lead_payload_for_meddic,
     extract_readai_fields,
+    get_all_external_attendee_emails,
     meddic_to_note_content,
-    select_best_external_attendee_email,
     today_ymd,
 )
 from app.services.slack_service import notify_demo_completed
@@ -80,18 +80,38 @@ def _process_meeting_completed(ctx: JobContext) -> None:
         return
 
     attendees = fields["attendees"]
-    email = select_best_external_attendee_email(attendees)
-    if not email:
-        # Fallback: any attendee email if no external found
-        for a in attendees:
-            em = a.get("email")
-            if isinstance(em, str) and em.strip():
-                email = em.strip().lower()
-                break
-    if not email:
-        raise PermanentJobError("No attendee email available to match Lead")
+    owner = fields.get("owner", {})
 
-    existing = find_lead_by_email(email)
+    # Get all external attendee emails (owner is prioritized first)
+    external_emails = get_all_external_attendee_emails(attendees, owner)
+    if not external_emails:
+        raise PermanentJobError("No external attendee email available to match Lead")
+
+    # Try to find an existing lead for any of the external attendees
+    # This handles cases where john@acme.com booked the meeting but mary@acme.com also attended
+    email = None
+    existing = None
+    for candidate_email in external_emails:
+        lead = find_lead_by_email(candidate_email)
+        if lead and isinstance(lead, dict) and lead.get("id"):
+            # Found a match! Use this email and lead
+            email = candidate_email
+            existing = lead
+            logger.info(
+                "✅ Matched Read.ai meeting to existing Zoho lead. email=%s lead_id=%s (tried %d emails)",
+                email,
+                lead.get("id"),
+                external_emails.index(candidate_email) + 1,
+            )
+            break
+
+    # If no existing lead found, use the first external email (owner if available)
+    if not email:
+        email = external_emails[0]
+        logger.info(
+            "No existing lead found for any attendee. Will create new lead with email=%s",
+            email,
+        )
     if existing and isinstance(existing, dict) and existing.get("id"):
         lead_id = str(existing["id"])
         # Preserve existing basic fields when updating
@@ -109,7 +129,11 @@ def _process_meeting_completed(ctx: JobContext) -> None:
                 first_name = att.get("first_name", "") or att.get("name", "").split()[0] if att.get("name") else ""
                 last_name = att.get("last_name", "") or " ".join(att.get("name", "").split()[1:]) if att.get("name") and " " in att.get("name", "") else ""
                 break
-        
+
+        # Truncate names to Zoho's 40-character limit to prevent validation errors
+        first_name = first_name[:40] if first_name else ""
+        last_name = last_name[:40] if last_name else ""
+
         create_payload = {
             "Email": email,
             settings.ZOHO_LEAD_STATUS_FIELD: settings.STATUS_DEMO_COMPLETE,
@@ -211,7 +235,13 @@ def _process_meeting_completed(ctx: JobContext) -> None:
                 logger.warning("⚠️  Zoho update may have issues: %s", zoho_response)
 
     note_title = f"Read.ai Demo Summary (MEDDIC) - {today_ymd()}"
-    note_content = meddic_to_note_content(meddic, recording_url=str(fields["recording_url"] or ""))
+    note_content = meddic_to_note_content(
+        meddic,
+        recording_url=str(fields["recording_url"] or ""),
+        attendees=attendees,
+        transcript_raw=ev.payload.get("transcript"),
+        owner=owner,
+    )
     create_note(lead_id, note_title, note_content)
 
     if settings.CREATE_FOLLOWUP_TASK:
