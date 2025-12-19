@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # Read.ai
     READAI_SHARED_SECRET: str = Field(default="")
     READAI_CUSTOMER_DOMAINS: str = Field(default="govisually.com,clockworkstudio.com")
-    READAI_MIN_DURATION_MINUTES: int = Field(default=10)
+    READAI_MIN_DURATION_MINUTES: int = Field(default=5)
 
     # LLM (Gemini)
     LLM_PROVIDER: str = Field(default="gemini")

@@ -222,3 +222,4 @@ Both will display nicely in Slack, but `attachments` has better visual formattin
 ---
 
 **Need help?** Check the main `SLACK_NOTIFICATIONS.md` guide or test with `scripts/test_slack_webhook.py`.
+
