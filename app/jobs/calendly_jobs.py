@@ -46,7 +46,7 @@ def _auto_enrich_lead(email: str, lead_id: str, company: str = "") -> None:
             return
 
         # Build Zoho update payload from enrichment
-        zoho_payload = _build_zoho_payload_from_enrichment(enrichment)
+        zoho_payload = _build_zoho_payload_from_enrichment(enrichment, email)
 
         # Update Zoho lead with enrichment data
         if zoho_payload:
