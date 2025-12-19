@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     READAI_CUSTOMER_DOMAINS: str = Field(default="govisually.com,clockworkstudio.com")
     READAI_MIN_DURATION_MINUTES: int = Field(default=5)
 
+    # Intercom
+    INTERCOM_API_KEY: str = Field(default="")
+    INTERCOM_ADMIN_ID: str = Field(default="")
+    INTERCOM_WEBHOOK_SECRET: str = Field(default="")
+    INTERCOM_QUALIFYING_TAGS: str = Field(default="Lead", description="Comma-separated list of tags that trigger Zoho lead creation")
+    STATUS_SUPPORT_QUALIFIED: str = Field(default="Qualified", description="Zoho lead status for Intercom qualified leads")
+    ENABLE_AUTO_ENRICH_INTERCOM: bool = Field(default=True, description="Auto-enrich Intercom leads with Apollo + Website")
+
     # LLM (Gemini)
     LLM_PROVIDER: str = Field(default="gemini")
     GEMINI_API_KEY: str = Field(default="")

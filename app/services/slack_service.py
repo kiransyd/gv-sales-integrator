@@ -246,6 +246,33 @@ def notify_enrichment_completed(
     )
 
 
+def notify_support_qualified(
+    *,
+    email: str,
+    name: str,
+    company: str,
+    tags: list[str],
+    lead_id: Optional[str] = None,
+) -> None:
+    """Send notification when an Intercom contact is qualified for sales."""
+    tags_text = ", ".join(tags) if tags else "N/A"
+    fields = [
+        {"title": "Email", "value": email},
+        {"title": "Name", "value": name or "N/A"},
+        {"title": "Company", "value": company or "N/A"},
+        {"title": "Qualifying Tags", "value": tags_text},
+    ]
+    if lead_id:
+        fields.append({"title": "Zoho Lead ID", "value": lead_id})
+
+    send_slack_event(
+        title="🎯 Support Contact Qualified",
+        message=f"*{name or email}* from *{company or 'Unknown'}* has been qualified from Intercom support.",
+        color="good",
+        fields=fields,
+    )
+
+
 
 
 
