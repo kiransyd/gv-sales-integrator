@@ -83,6 +83,17 @@ def scrape_website(domain: str, base_url: str):
             if intel.get("recent_news"):
                 print("📰 Recent news:")
                 print(intel["recent_news"])
+
+                # Show news sources if available
+                if intel.get("news_sources") and len(intel["news_sources"]) > 0:
+                    print()
+                    print("Sources:")
+                    for i, source in enumerate(intel["news_sources"], 1):
+                        title = source.get("title", "No title")
+                        url = source.get("url", "")
+                        print(f"  {i}. {title}")
+                        if url:
+                            print(f"     {url}")
                 print()
 
             if intel.get("growth_signals"):

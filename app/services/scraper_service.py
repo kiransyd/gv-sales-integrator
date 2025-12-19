@@ -255,12 +255,29 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
 
     logger.info("📄 Scraped %d pages for %s", len(page_contents), domain)
 
+    # Fetch recent news using grounded search (Gemini 2.5 Flash with Google Search)
+    from app.services.llm_service import fetch_grounded_company_news
+
+    # Try to extract company name from domain (best effort)
+    company_name = domain.split(".")[0].replace("-", " ").title()
+
+    logger.info("📰 Fetching recent news with grounded search for %s", company_name)
+    grounded_news = fetch_grounded_company_news(company_name, domain)
+    news_summary = grounded_news.get("news_summary", "")
+    news_sources = grounded_news.get("sources", [])
+
+    logger.info("Grounded news: %s (sources: %d)", "found" if news_summary else "none", len(news_sources))
+
     # Combine all page content for LLM analysis
     combined_text = ""
     for page_type, text in page_contents.items():
         # Truncate each page to avoid token limits
         truncated = text[:5000] if len(text) > 5000 else text
         combined_text += f"\n\n=== {page_type.upper()} PAGE ===\n{truncated}\n"
+
+    # Add grounded news to LLM prompt if found
+    if news_summary:
+        combined_text += f"\n\n=== RECENT NEWS (from Google Search) ===\n{news_summary}\n"
 
     # Analyze with LLM
     logger.info("Analyzing website content with LLM (%d chars)", len(combined_text))
@@ -310,7 +327,15 @@ Output JSON only, no markdown or explanation."""
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
-        logger.info("Website intelligence extracted for %s", domain)
+
+        # Override recent_news with grounded search result if found
+        if news_summary:
+            intelligence.recent_news = news_summary
+
+        # Add news sources from grounded search
+        intelligence.news_sources = news_sources
+
+        logger.info("Website intelligence extracted for %s (news sources: %d)", domain, len(news_sources))
         logger.debug("Intelligence fields populated: %s", {k: bool(v) for k, v in intelligence.model_dump().items()})
         return intelligence
     except Exception as e:

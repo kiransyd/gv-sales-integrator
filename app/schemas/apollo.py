@@ -59,6 +59,9 @@ class WebsiteIntelligence(BaseModel):
     use_cases: str = Field(default="", description="Specific use cases, industries they serve, or problem scenarios")
     content_depth: str = Field(default="", description="Quality/depth assessment - are they content-rich? Blog? Resources? Thought leadership?")
 
+    # Grounded search news (populated separately from Gemini Grounded Search)
+    news_sources: list[dict] = Field(default_factory=list, description="News sources from grounded search with title and URL")
+
 
 class EnrichmentResult(BaseModel):
     """Combined enrichment result"""
