@@ -90,7 +90,6 @@ async def enrich_lead(
 @router.post("/scrape/website")
 async def scrape_website_endpoint(
     request: ScrapeWebsiteRequest,
-    x_enrich_secret: str = Header(None, alias="X-Enrich-Secret"),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """
@@ -99,15 +98,15 @@ async def scrape_website_endpoint(
     Uses Crawl4AI (free) with ScraperAPI fallback.
     Returns immediately with website intelligence analysis.
 
+    Public endpoint - no authentication required.
+
     Example:
         POST /scrape/website
         {
             "domain": "deputy.com"
         }
     """
-    # Verify secret key (optional - remove if you want it public)
-    if settings.ENRICH_SECRET_KEY and x_enrich_secret != settings.ENRICH_SECRET_KEY:
-        raise HTTPException(status_code=401, detail="Invalid secret key")
+    # No authentication required for website scraping
 
     if not request.domain:
         raise HTTPException(status_code=400, detail="Domain is required")

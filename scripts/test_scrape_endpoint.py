@@ -33,15 +33,11 @@ def load_env_file(env_path: str) -> dict[str, str]:
     return env_vars
 
 
-def scrape_website(domain: str, base_url: str, secret_key: str = None):
+def scrape_website(domain: str, base_url: str):
     """Call the scrape/website endpoint"""
 
     url = f"{base_url}/scrape/website"
     headers = {"Content-Type": "application/json"}
-
-    if secret_key:
-        headers["X-Enrich-Secret"] = secret_key
-
     payload = {"domain": domain}
 
     print(f"📤 Scraping website: {domain}")
@@ -139,10 +135,9 @@ def main():
     env_vars = load_env_file(args.env)
 
     base_url = env_vars.get("BASE_URL", "http://localhost:8000")
-    secret_key = env_vars.get("ENRICH_SECRET_KEY", "")
 
     # Scrape website
-    scrape_website(args.domain, base_url, secret_key)
+    scrape_website(args.domain, base_url)
 
 
 if __name__ == "__main__":
