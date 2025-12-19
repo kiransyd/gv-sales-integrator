@@ -605,3 +605,105 @@ def fetch_grounded_company_news(company_name: str, domain: str) -> dict[str, Any
         return {"news_summary": "", "sources": [], "search_queries": []}
 
 
+def fetch_grounded_competitors(company_name: str, domain: str, industry: str = "") -> dict[str, Any]:
+    """
+    Fetch competitors using Gemini Grounded Search (gemini-2.5-flash).
+
+    Args:
+        company_name: Name of the company
+        domain: Company domain
+        industry: Optional industry to help narrow down competitors
+
+    Returns:
+        {
+            "competitors_summary": "List of competitors with brief descriptions",
+            "sources": [{"title": "...", "url": "...", "snippet": "..."}],
+            "search_queries": ["query1", "query2"]
+        }
+    """
+    from google import genai
+    from google.genai import types
+
+    settings = get_settings()
+    if not settings.GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY not configured - skipping grounded competitors search")
+        return {"competitors_summary": "", "sources": [], "search_queries": []}
+
+    try:
+        # Initialize client
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        # Enable grounded search
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
+
+        # Craft search prompt
+        industry_context = f" in the {industry} industry" if industry else ""
+        search_prompt = (
+            f"Find the main competitors and alternative solutions to {company_name} (domain: {domain}){industry_context}. "
+            f"Identify direct competitors, alternative tools, and companies that offer similar products or services. "
+            f"Focus on well-known competitors in the market. "
+            f"Provide a concise list of 3-5 main competitors with brief descriptions of what they offer. "
+            f"Format as a numbered list with company names and what they do."
+        )
+
+        logger.info("🔍 Searching for grounded competitors: %s (domain: %s, industry: %s)", company_name, domain, industry or "N/A")
+
+        # Call Gemini with grounded search
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',  # Using gemini-2.5-flash for grounded search
+            contents=search_prompt,
+            config=types.GenerateContentConfig(
+                tools=[grounding_tool],
+                temperature=0.3,
+            )
+        )
+
+        # Extract response text
+        competitors_summary = response.text if response.text else ""
+
+        # Extract grounding metadata (sources)
+        sources = []
+        search_queries = []
+
+        if response.candidates and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+
+            # Get grounding metadata
+            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                metadata = candidate.grounding_metadata
+
+                # Extract search queries
+                if hasattr(metadata, 'web_search_queries'):
+                    search_queries = list(metadata.web_search_queries) if metadata.web_search_queries else []
+                    logger.info("📊 Grounded search used %d queries: %s", len(search_queries), search_queries)
+
+                # Extract grounding chunks (sources)
+                if hasattr(metadata, 'grounding_chunks'):
+                    chunks = metadata.grounding_chunks
+                    for chunk in chunks:
+                        if hasattr(chunk, 'web') and chunk.web:
+                            web_info = chunk.web
+                            sources.append({
+                                "title": web_info.title if hasattr(web_info, 'title') else "",
+                                "url": web_info.uri if hasattr(web_info, 'uri') else "",
+                                "snippet": ""  # Snippet not always available
+                            })
+
+                    logger.info("✅ Found %d source(s) for competitors of %s", len(sources), company_name)
+
+        # If no competitors found, return empty
+        if not competitors_summary or competitors_summary.strip() == "":
+            logger.info("No competitors found for %s", company_name)
+            return {"competitors_summary": "", "sources": [], "search_queries": search_queries}
+
+        return {
+            "competitors_summary": competitors_summary.strip(),
+            "sources": sources[:5],  # Limit to top 5 sources
+            "search_queries": search_queries
+        }
+
+    except Exception as e:  # noqa: BLE001
+        logger.error("Grounded competitors search failed for %s: %s", company_name, e)
+        return {"competitors_summary": "", "sources": [], "search_queries": []}
+
+

@@ -256,7 +256,7 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
     logger.info("📄 Scraped %d pages for %s", len(page_contents), domain)
 
     # Fetch recent news using grounded search (Gemini 2.5 Flash with Google Search)
-    from app.services.llm_service import fetch_grounded_company_news
+    from app.services.llm_service import fetch_grounded_company_news, fetch_grounded_competitors
 
     # Try to extract company name from domain (best effort)
     company_name = domain.split(".")[0].replace("-", " ").title()
@@ -268,6 +268,14 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
 
     logger.info("Grounded news: %s (sources: %d)", "found" if news_summary else "none", len(news_sources))
 
+    # Fetch competitors using grounded search (Gemini 2.5 Flash with Google Search)
+    logger.info("🔍 Fetching competitors with grounded search for %s", company_name)
+    grounded_competitors = fetch_grounded_competitors(company_name, domain)
+    competitors_summary = grounded_competitors.get("competitors_summary", "")
+    competitors_sources = grounded_competitors.get("sources", [])
+
+    logger.info("Grounded competitors: %s (sources: %d)", "found" if competitors_summary else "none", len(competitors_sources))
+
     # Combine all page content for LLM analysis
     combined_text = ""
     for page_type, text in page_contents.items():
@@ -278,6 +286,10 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
     # Add grounded news to LLM prompt if found
     if news_summary:
         combined_text += f"\n\n=== RECENT NEWS (from Google Search) ===\n{news_summary}\n"
+
+    # Add grounded competitors to LLM prompt if found
+    if competitors_summary:
+        combined_text += f"\n\n=== COMPETITORS (from Google Search) ===\n{competitors_summary}\n"
 
     # Analyze with LLM
     logger.info("Analyzing website content with LLM (%d chars)", len(combined_text))
@@ -335,7 +347,12 @@ Output JSON only, no markdown or explanation."""
         # Add news sources from grounded search
         intelligence.news_sources = news_sources
 
-        logger.info("Website intelligence extracted for %s (news sources: %d)", domain, len(news_sources))
+        # Override competitors_mentioned with grounded search result if found
+        if competitors_summary:
+            intelligence.competitors_mentioned = competitors_summary
+
+        logger.info("Website intelligence extracted for %s (news sources: %d, competitors: %s)", 
+                   domain, len(news_sources), "found" if competitors_summary else "none")
         logger.debug("Intelligence fields populated: %s", {k: bool(v) for k, v in intelligence.model_dump().items()})
         return intelligence
     except Exception as e:
