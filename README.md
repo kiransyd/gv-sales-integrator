@@ -16,6 +16,7 @@ Receives **Calendly** and **Read.ai** webhooks, enriches leads with **Apollo.io*
 - **Apollo.io**: Company size, industry, funding, tech stack, job titles
 - **Crawl4AI**: FREE multi-page website scraping (homepage + key pages: about, products, pricing, careers, blog)
 - **BrandFetch**: Automatic company logo upload to Zoho Lead photo
+- **Gemini Grounded Search (2.5-flash)**: Real-time company news with source citations (funding, launches, partnerships, acquisitions)
 - **Gemini LLM**: Deep industry-specific intelligence extraction (CPG regulations, SaaS compliance, certifications, product catalogs)
 
 ### 📊 **Read.ai Integration**
@@ -284,6 +285,45 @@ Gemini analyzes multi-page content and extracts **17 intelligence fields**:
 - **SaaS company** (Notion): Product features (AI Search, AI Chatbot), pricing ($35/user), Fortune 100 adoption, use cases
 
 All in conversational, sales-focused tone - like a teammate briefing you before a demo call.
+
+## 📰 Grounded News Search
+
+### Gemini Grounded Search (gemini-2.5-flash)
+Real-time company news powered by Google Search integration:
+
+**What it finds:**
+- Funding rounds and valuations
+- Product launches and updates
+- Strategic partnerships and acquisitions
+- Leadership changes
+- Company milestones and achievements
+- Industry recognition and awards
+
+**How it works:**
+1. LLM automatically generates optimal search queries
+2. Searches Google for recent news (last 6 months)
+3. Synthesizes findings into conversational summary
+4. Returns source citations with URLs
+
+**Example Output:**
+> "Hey team, Anthropic has had a busy six months, securing a massive $13 billion Series F funding round in September, which pushed their valuation to $183 billion, and their run-rate revenue has soared to over $5 billion. They've also been on a product spree, launching new Claude models..."
+>
+> **Sources:**
+> 1. Wikipedia - [url]
+> 2. TechCrunch - [url]
+> 3. Investing.com - [url]
+
+**Pricing:**
+- **Free until Jan 5, 2026**
+- After: Pay-per-query (charged per search executed)
+- Gemini 2.5 models: Billed per prompt
+- Typical usage: 1-3 queries per company = minimal cost
+
+**When it runs:**
+- Automatically during lead enrichment (Calendly webhook)
+- On-demand via `/scrape/website` endpoint
+- Populates `recent_news` field with grounded results
+- Adds `news_sources` array with citation URLs
 
 ## 🐛 Troubleshooting
 
