@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.services.event_store_service import new_event_id, set_event_status, store_incoming_event
 from app.services.rq_service import default_retry, get_queue
+from app.services.scraper_service import scrape_website
 from app.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,11 @@ class EnrichLeadRequest(BaseModel):
     """Request to enrich a lead"""
     lead_id: str = Field(default="", description="Zoho Lead ID (optional if email provided)")
     email: str = Field(description="Lead email address (required)")
+
+
+class ScrapeWebsiteRequest(BaseModel):
+    """Request to scrape a website"""
+    domain: str = Field(description="Domain to scrape (e.g., 'nike.com', 'deputy.com')")
 
 
 @router.post("/enrich/lead")
@@ -79,3 +85,59 @@ async def enrich_lead(
         "event_id": event_id,
         "message": f"Lead enrichment queued for {request.email}. Check back in 30-60 seconds.",
     }
+
+
+@router.post("/scrape/website")
+async def scrape_website_endpoint(
+    request: ScrapeWebsiteRequest,
+    x_enrich_secret: str = Header(None, alias="X-Enrich-Secret"),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """
+    Scrape a website and return sales intelligence.
+
+    Uses Crawl4AI (free) with ScraperAPI fallback.
+    Returns immediately with website intelligence analysis.
+
+    Example:
+        POST /scrape/website
+        {
+            "domain": "deputy.com"
+        }
+    """
+    # Verify secret key (optional - remove if you want it public)
+    if settings.ENRICH_SECRET_KEY and x_enrich_secret != settings.ENRICH_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid secret key")
+
+    if not request.domain:
+        raise HTTPException(status_code=400, detail="Domain is required")
+
+    # Clean domain
+    domain = request.domain.strip().lower()
+    domain = domain.replace("https://", "").replace("http://", "")
+    domain = domain.replace("www.", "")
+    domain = domain.rstrip("/")
+
+    logger.info("Scraping website via API: %s", domain)
+
+    # Scrape website
+    try:
+        intelligence = scrape_website(domain)
+
+        if not intelligence:
+            return {
+                "ok": False,
+                "error": "Failed to scrape website",
+                "domain": domain,
+            }
+
+        # Return the intelligence as a dict
+        return {
+            "ok": True,
+            "domain": domain,
+            "intelligence": intelligence.model_dump(),
+        }
+
+    except Exception as e:  # noqa: BLE001
+        logger.error("Website scraping failed for %s: %s", domain, e)
+        raise HTTPException(status_code=500, detail=f"Scraping failed: {str(e)}") from e
