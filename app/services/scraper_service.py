@@ -111,6 +111,58 @@ async def _scrape_with_crawl4ai(url: str) -> Optional[str]:
         return None
 
 
+async def _scrape_multi_page_crawl4ai(domain: str, max_pages: int = 5) -> dict[str, str]:
+    """
+    Scrape multiple pages from a domain using Crawl4AI.
+    Returns dict of {page_type: markdown_content}
+    """
+    from crawl4ai import AsyncWebCrawler
+    from bs4 import BeautifulSoup
+
+    results = {}
+    homepage_url = f"https://{domain}"
+
+    try:
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            # 1. Scrape homepage
+            home_result = await crawler.arun(
+                url=homepage_url,
+                bypass_cache=True,
+                word_count_threshold=10,
+            )
+
+            if home_result.success and home_result.markdown:
+                results["homepage"] = home_result.markdown
+                logger.info("✓ Homepage scraped: %d chars", len(home_result.markdown))
+
+                # 2. Discover key pages from homepage HTML
+                key_pages = _discover_key_pages(domain, home_result.html or "")
+
+                # 3. Scrape discovered pages (limit to max_pages - 1 for homepage)
+                pages_to_scrape = list(key_pages.items())[:max_pages - 1]
+
+                for page_type, page_url in pages_to_scrape:
+                    try:
+                        page_result = await crawler.arun(
+                            url=page_url,
+                            bypass_cache=True,
+                            word_count_threshold=10,
+                        )
+
+                        if page_result.success and page_result.markdown:
+                            results[page_type] = page_result.markdown
+                            logger.info("✓ %s page scraped: %d chars", page_type.capitalize(), len(page_result.markdown))
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Failed to scrape %s page: %s", page_type, e)
+
+        logger.info("Multi-page scrape complete for %s: %d pages scraped", domain, len(results))
+        return results
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Multi-page Crawl4AI failed for %s: %s", domain, e)
+        return {}
+
+
 def _scrape_with_scraperapi(url: str) -> Optional[str]:
     """
     Fallback: Scrape URL using ScraperAPI (paid, but handles bot detection).
@@ -164,9 +216,11 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
     """
     Scrape company website and use LLM to extract sales intelligence.
 
-    Scrapes homepage + key pages (about, pricing, careers, etc.)
-    using Crawl4AI (free) with ScraperAPI fallback, then analyzes
-    content with Gemini LLM.
+    **Multi-page deep scraping:**
+    - Scrapes homepage + key pages (about, products, pricing, careers, blog)
+    - Extracts product catalogs, certifications, regulations
+    - Industry-specific intelligence (CPG regulations, SaaS compliance, etc.)
+    - Uses Crawl4AI (free) with ScraperAPI fallback
     """
     settings = get_settings()
 
@@ -174,20 +228,32 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
         logger.info("Website scraping disabled (ENABLE_WEBSITE_SCRAPING=false)")
         return None
 
-    homepage_url = f"https://{domain}"
-    logger.info("Scraping website: %s (Crawl4AI + ScraperAPI fallback)", homepage_url)
+    logger.info("🔍 Deep scraping website: %s (multi-page with Crawl4AI)", domain)
 
-    # Scrape homepage
-    homepage_content = _scrape_url(homepage_url)
-    if not homepage_content:
-        logger.warning("Failed to scrape homepage: %s", homepage_url)
-        return None
+    # Multi-page scraping with Crawl4AI
+    try:
+        page_contents = asyncio.run(_scrape_multi_page_crawl4ai(domain, max_pages=5))
 
-    logger.info("Scraped homepage: %s (%d chars)", homepage_url, len(homepage_content))
+        if not page_contents:
+            logger.warning("Multi-page scraping failed, trying single page fallback")
+            # Fallback to single page
+            homepage_url = f"https://{domain}"
+            homepage_content = _scrape_url(homepage_url)
+            if not homepage_content:
+                logger.warning("Failed to scrape %s", domain)
+                return None
+            page_contents = {"homepage": homepage_content}
 
-    # For now, just use homepage content (Crawl4AI already extracts clean content)
-    # In future, could discover and scrape key pages too
-    page_contents = {"homepage": homepage_content}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Multi-page scraping error: %s, trying single page fallback", e)
+        homepage_url = f"https://{domain}"
+        homepage_content = _scrape_url(homepage_url)
+        if not homepage_content:
+            logger.warning("Failed to scrape %s", domain)
+            return None
+        page_contents = {"homepage": homepage_content}
+
+    logger.info("📄 Scraped %d pages for %s", len(page_contents), domain)
 
     # Combine all page content for LLM analysis
     combined_text = ""
@@ -206,11 +272,11 @@ def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
         "Focus on what matters for the demo: their business, their likely pain points, and how GoVisually can help."
     )
 
-    user_prompt = f"""I just researched this company's website. Here's what I found:
+    user_prompt = f"""I just deep-dived this company's website across multiple pages. Here's what I found:
 
 {combined_text}
 
-Write me some quick intel notes in JSON format. Keep it real and conversational - like you're briefing a teammate, not writing a report.
+Write me comprehensive intel notes in JSON format. Keep it real and conversational - like you're briefing a teammate before they hop on a call.
 
 Return ONLY valid JSON with these exact keys:
 {{
@@ -222,7 +288,16 @@ Return ONLY valid JSON with these exact keys:
   "growth_signals": "Are they hiring? Expanding? Growing fast? (e.g., 'Hiring a bunch of engineers - looks like they're scaling')",
   "key_pain_points": "What problems are they solving for THEIR customers? (helps us understand their world)",
   "competitors_mentioned": "Do they call out any competitors? (if found)",
-  "sales_insights": "3-4 bullet points on how to approach this demo. What should we focus on? What will resonate? Return as a SINGLE STRING with newlines between bullets, NOT an array. (Examples: '• They're in packaging/CPG - lead with our proofing workflow\\n• Remote team across 3 offices - emphasize async collaboration\\n• Using Adobe/Figma - show our integrations')"
+  "sales_insights": "3-4 bullet points on how to approach this demo. What should we focus on? What will resonate? Return as a SINGLE STRING with newlines between bullets, NOT an array. (Examples: '• They're in packaging/CPG - lead with our proofing workflow\\n• Remote team across 3 offices - emphasize async collaboration\\n• Using Adobe/Figma - show our integrations')",
+
+  "product_catalog": "List their specific products/services if found on product pages (e.g., 'Product A: Does X, Product B: Does Y'). If they're CPG, list actual products. If SaaS, list features/tiers. (if found)",
+  "certifications": "Any certifications, compliance standards, credentials mentioned? (ISO 27001, SOC2, HIPAA, FDA approval, USDA Organic, Fair Trade, B-Corp, etc.) (if found)",
+  "regulations": "What regulatory environment do they operate in? Any compliance mentions? (Prop 65, GDPR, EPA standards, food safety, FDA regulations, OSHA, industry-specific rules) (if found)",
+  "team_size_signals": "Office locations, team size mentions, hiring activity from careers/about pages (e.g., '3 offices - NYC, London, SF. Hiring 10+ roles in engineering')",
+  "tech_stack_signals": "Technologies, platforms, integrations they mention using or offer (Salesforce, AWS, Stripe, Shopify, Adobe, etc.) (if found)",
+  "customer_segments": "Different customer types or industries they serve (e.g., 'Serve both B2B and B2C. Industries: Healthcare, Finance, Retail')",
+  "use_cases": "Specific use cases or problem scenarios they solve (e.g., 'Remote team collaboration, Product launches, Marketing campaigns')",
+  "content_depth": "How content-rich is the site? Active blog? Resources? Thought leadership? Or just basic marketing pages? (e.g., 'Super content-rich - 100+ blog posts, case studies, whitepapers' or 'Pretty basic marketing site, not much depth')"
 }}
 
 Keep it short, punchy, and useful. If you don't find something, just use empty string "".
@@ -236,6 +311,7 @@ Output JSON only, no markdown or explanation."""
             user_prompt=user_prompt,
         )
         logger.info("Website intelligence extracted for %s", domain)
+        logger.debug("Intelligence fields populated: %s", {k: bool(v) for k, v in intelligence.model_dump().items()})
         return intelligence
     except Exception as e:
         logger.error("Failed to analyze website content with LLM: %s", e)

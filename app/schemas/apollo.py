@@ -38,7 +38,7 @@ class ApolloCompanyData(BaseModel):
 
 
 class WebsiteIntelligence(BaseModel):
-    """LLM-analyzed website intelligence"""
+    """LLM-analyzed website intelligence with deep multi-page scraping"""
     value_proposition: str = Field(default="")
     target_market: str = Field(default="")
     products_services: str = Field(default="")
@@ -48,6 +48,16 @@ class WebsiteIntelligence(BaseModel):
     key_pain_points: str = Field(default="")
     competitors_mentioned: str = Field(default="")
     sales_insights: str = Field(default="")
+
+    # Deep intelligence fields (multi-page scraping)
+    product_catalog: str = Field(default="", description="List of specific products/services with descriptions (if found on product pages)")
+    certifications: str = Field(default="", description="Certifications, compliance, standards (ISO, SOC2, HIPAA, FDA, organic, etc.)")
+    regulations: str = Field(default="", description="Regulatory mentions, compliance requirements, industry regulations they face")
+    team_size_signals: str = Field(default="", description="Team size indicators, office locations, hiring mentions from about/careers pages")
+    tech_stack_signals: str = Field(default="", description="Technologies, integrations, platforms they mention using")
+    customer_segments: str = Field(default="", description="Different customer types or market segments they serve")
+    use_cases: str = Field(default="", description="Specific use cases, industries they serve, or problem scenarios")
+    content_depth: str = Field(default="", description="Quality/depth assessment - are they content-rich? Blog? Resources? Thought leadership?")
 
 
 class EnrichmentResult(BaseModel):

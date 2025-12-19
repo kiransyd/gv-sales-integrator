@@ -134,12 +134,20 @@ def prompt(msg: str, default: str = "") -> str:
 
 
 def main() -> None:
-    env_path = Path(".env")
+    # Parse command-line arguments for env file
+    env_file_name = ".env"
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ("--env", "-e") and len(sys.argv) > 2:
+            env_file_name = sys.argv[2]
+        else:
+            env_file_name = sys.argv[1]
+
+    env_path = Path(env_file_name)
     env = _read_env(env_path)
 
     token = env.get("CALENDLY_API_TOKEN", "").strip()
     if not token:
-        raise SystemExit("Missing CALENDLY_API_TOKEN in .env")
+        raise SystemExit(f"Missing CALENDLY_API_TOKEN in {env_file_name}")
 
     base_url = env.get("BASE_URL", "").strip() or "http://localhost:8000"
     print(f"Detected BASE_URL={base_url}")
@@ -216,8 +224,8 @@ def main() -> None:
         print(json.dumps(resp, indent=2)[:2000])
 
     # Offer to write env values
-    print("\nUpdate your .env now?")
-    if prompt("Write CALENDLY_EVENT_TYPE_URI + CALENDLY_SIGNING_KEY to .env? (y/n)", default="y").lower().startswith("y"):
+    print(f"\nUpdate your {env_file_name} now?")
+    if prompt(f"Write CALENDLY_EVENT_TYPE_URI + CALENDLY_SIGNING_KEY to {env_file_name}? (y/n)", default="y").lower().startswith("y"):
         if demo_event_type_uri:
             _write_env_value(env_path, "CALENDLY_EVENT_TYPE_URI", demo_event_type_uri)
             print("Wrote CALENDLY_EVENT_TYPE_URI.")
@@ -228,7 +236,7 @@ def main() -> None:
     print("\nNext steps:")
     print(f"- Ensure your service is reachable publicly (ngrok/Render) and BASE_URL is set accordingly.")
     print(f"- Calendly will POST to: {webhook_url}")
-    print("- Restart docker-compose so API picks up any .env changes.")
+    print(f"- Restart docker-compose so API picks up any {env_file_name} changes.")
     print("- Book/cancel/reschedule a demo and watch: docker-compose logs -f worker")
 
 

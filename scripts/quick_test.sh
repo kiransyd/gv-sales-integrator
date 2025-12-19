@@ -15,3 +15,4 @@ echo "   docker-compose logs worker --tail 200 | grep -E '(Creating Zoho|Updatin
 echo ""
 
 
+

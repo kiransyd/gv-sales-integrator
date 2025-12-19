@@ -130,11 +130,11 @@ async def scrape_website_endpoint(
                 "domain": domain,
             }
 
-        # Return the intelligence as a dict
+        # Return the intelligence as a dict (include all fields, even defaults)
         return {
             "ok": True,
             "domain": domain,
-            "intelligence": intelligence.model_dump(),
+            "intelligence": intelligence.model_dump(exclude_unset=False, exclude_defaults=False, exclude_none=False),
         }
 
     except Exception as e:  # noqa: BLE001

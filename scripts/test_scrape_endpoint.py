@@ -105,6 +105,47 @@ def scrape_website(domain: str, base_url: str):
                 print(intel["sales_insights"])
                 print()
 
+            # Deep intelligence fields
+            if intel.get("product_catalog"):
+                print("📦 Product catalog:")
+                print(intel["product_catalog"])
+                print()
+
+            if intel.get("certifications"):
+                print("🏆 Certifications:")
+                print(intel["certifications"])
+                print()
+
+            if intel.get("regulations"):
+                print("📋 Regulations:")
+                print(intel["regulations"])
+                print()
+
+            if intel.get("team_size_signals"):
+                print("👥 Team size signals:")
+                print(intel["team_size_signals"])
+                print()
+
+            if intel.get("tech_stack_signals"):
+                print("⚙️ Tech stack:")
+                print(intel["tech_stack_signals"])
+                print()
+
+            if intel.get("customer_segments"):
+                print("🎯 Customer segments:")
+                print(intel["customer_segments"])
+                print()
+
+            if intel.get("use_cases"):
+                print("💼 Use cases:")
+                print(intel["use_cases"])
+                print()
+
+            if intel.get("content_depth"):
+                print("📚 Content depth:")
+                print(intel["content_depth"])
+                print()
+
             print("━" * 60)
             print()
             print("💾 Full JSON response:")

@@ -2,34 +2,44 @@ import requests
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 # Load BASE_URL and READAI_SHARED_SECRET from .env
-def load_env_var(key: str, default: str = "") -> str:
+def load_env_var(key: str, env_file_name: str = ".env", default: str = "") -> str:
     """Load environment variable from .env file or environment"""
     # First check environment
     if key in os.environ:
         return os.environ[key]
-    
+
     # Then check .env file
-    env_file = Path(__file__).parent.parent / ".env"
+    env_file = Path(__file__).parent.parent / env_file_name
     if env_file.exists():
         content = env_file.read_text()
         match = re.search(rf"^{re.escape(key)}=(.+)$", content, flags=re.M)
         if match:
             return match.group(1).strip()
-    
+
     return default
 
+# Parse command-line arguments for env file
+env_file = ".env"
+if len(sys.argv) > 1:
+    if sys.argv[1] in ("--env", "-e") and len(sys.argv) > 2:
+        env_file = sys.argv[2]
+    else:
+        env_file = sys.argv[1]
+
 # Get webhook URL from .env
-base_url = load_env_var("BASE_URL", "http://localhost:8000")
+base_url = load_env_var("BASE_URL", env_file, "http://localhost:8000")
 webhook_url = f"{base_url.rstrip('/')}/webhooks/readai"
 
 # Get shared secret (optional)
-readai_secret = load_env_var("READAI_SHARED_SECRET", "")
+readai_secret = load_env_var("READAI_SHARED_SECRET", env_file, "")
 
 print(f"📤 Sending Read.ai webhook to: {webhook_url}")
+print(f"🔧 Using environment: {env_file}")
 if readai_secret:
     print(f"🔐 Using shared secret authentication")
 else:
