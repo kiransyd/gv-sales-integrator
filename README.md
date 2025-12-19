@@ -14,9 +14,9 @@ Receives **Calendly** and **Read.ai** webhooks, enriches leads with **Apollo.io*
 
 ### 🤖 **Auto-Enrichment**
 - **Apollo.io**: Company size, industry, funding, tech stack, job titles
-- **Crawl4AI**: FREE website scraping (Markdown output, LLM-friendly)
+- **Crawl4AI**: FREE multi-page website scraping (homepage + key pages: about, products, pricing, careers, blog)
 - **BrandFetch**: Automatic company logo upload to Zoho Lead photo
-- **Gemini LLM**: Conversational sales intelligence (not corporate-speak!)
+- **Gemini LLM**: Deep industry-specific intelligence extraction (CPG regulations, SaaS compliance, certifications, product catalogs)
 
 ### 📊 **Read.ai Integration**
 - Post-demo MEDDIC analysis from meeting transcripts
@@ -248,10 +248,12 @@ Set `DRY_RUN=true` to test without writing to Zoho. Worker logs what it would se
 
 ## 🔍 Website Scraping
 
-### Crawl4AI (Primary - FREE)
-- Playwright-based headless browser
-- Returns clean Markdown (LLM-friendly)
-- Fast: ~1.5 seconds per page
+### Multi-Page Deep Scraping
+- **Crawl4AI (Primary - FREE)**: Playwright-based headless browser
+- **Up to 5 pages per domain**: Homepage + discovered key pages (about, products, pricing, careers, blog)
+- **Smart page discovery**: Automatically finds relevant sections
+- **Returns clean Markdown**: LLM-friendly format
+- **Fast**: ~1.5 seconds per page
 - **Cost**: $0
 
 ### ScraperAPI (Fallback - Paid)
@@ -259,12 +261,29 @@ Set `DRY_RUN=true` to test without writing to Zoho. Worker logs what it would se
 - Handles tough sites like Stripe
 - **Cost**: ~$5-15/month (vs $150 before)
 
-### LLM Analysis
-Gemini analyzes scraped content and returns:
-- Conversational sales intelligence
-- Actionable demo approach tips
-- Growth signals, pain points, competitors
-- All in friendly, teammate-to-teammate tone
+### Deep Intelligence Extraction
+Gemini analyzes multi-page content and extracts **17 intelligence fields**:
+
+**Core Intelligence:**
+- Value proposition, target market, products/services
+- Pricing model, recent news, growth signals
+- Pain points, competitors, sales approach tactics
+
+**Deep Industry-Specific Intelligence:**
+- **Product catalogs**: CPG products, SaaS features, service offerings
+- **Certifications**: ISO 27001, SOC2, HIPAA, FDA approval, USDA Organic, Fair Trade, B-Corp
+- **Regulations**: Prop 65, GDPR, EPA, food safety, FDA, OSHA, industry-specific compliance
+- **Team size signals**: Office locations, hiring activity, headcount indicators
+- **Tech stack**: Technologies, platforms, integrations mentioned
+- **Customer segments**: Industries served, customer types (B2B/B2C, SMB/Enterprise)
+- **Use cases**: Specific problem scenarios and workflows
+- **Content depth**: Blog activity, resources, thought leadership assessment
+
+**Examples:**
+- **CPG company** (Annie's): Product list (Mac & Cheese, Snacks), USDA Organic certification, FDA/food safety regulations
+- **SaaS company** (Notion): Product features (AI Search, AI Chatbot), pricing ($35/user), Fortune 100 adoption, use cases
+
+All in conversational, sales-focused tone - like a teammate briefing you before a demo call.
 
 ## 🐛 Troubleshooting
 
