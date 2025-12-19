@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -23,13 +24,13 @@ class ScraperTransientError(ScraperError):
 
 
 def _scraper_api_url(target_url: str) -> str:
-    """Build ScraperAPI proxy URL"""
+    """Build ScraperAPI proxy URL (fallback method)"""
     settings = get_settings()
     return f"https://api.scraperapi.com?api_key={settings.SCRAPER_API_KEY}&url={target_url}"
 
 
 def _extract_text_from_html(html: str) -> str:
-    """Extract readable text from HTML using BeautifulSoup"""
+    """Extract readable text from HTML using BeautifulSoup (fallback method)"""
     soup = BeautifulSoup(html, "html.parser")
 
     # Remove script and style elements
@@ -83,68 +84,110 @@ def _discover_key_pages(domain: str, homepage_html: str) -> dict[str, str]:
     return discovered
 
 
+async def _scrape_with_crawl4ai(url: str) -> Optional[str]:
+    """
+    Scrape URL using Crawl4AI (free, LLM-friendly).
+    Returns markdown content, or None if failed.
+    """
+    try:
+        from crawl4ai import AsyncWebCrawler
+
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            result = await crawler.arun(
+                url=url,
+                bypass_cache=True,
+                word_count_threshold=10,  # Filter out short/noisy content
+            )
+
+            if result.success and result.markdown:
+                logger.info("Crawl4AI scraped %s successfully (%d chars markdown)", url, len(result.markdown))
+                return result.markdown
+            else:
+                logger.warning("Crawl4AI failed to scrape %s: %s", url, result.error_message if hasattr(result, 'error_message') else 'unknown error')
+                return None
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Crawl4AI error for %s: %s", url, e)
+        return None
+
+
+def _scrape_with_scraperapi(url: str) -> Optional[str]:
+    """
+    Fallback: Scrape URL using ScraperAPI (paid, but handles bot detection).
+    Returns text content, or None if failed.
+    """
+    settings = get_settings()
+
+    if not settings.SCRAPER_API_KEY:
+        logger.debug("SCRAPER_API_KEY not set, cannot use fallback scraper")
+        return None
+
+    try:
+        scraper_url = _scraper_api_url(url)
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(scraper_url)
+            resp.raise_for_status()
+            html = resp.text
+
+        text = _extract_text_from_html(html)
+        logger.info("ScraperAPI (fallback) scraped %s successfully (%d chars)", url, len(text))
+        return text
+
+    except (httpx.TimeoutException, httpx.NetworkError) as e:
+        raise ScraperTransientError(f"Timeout scraping {url}: {e}") from e
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        if code == 429 or 500 <= code <= 599:
+            raise ScraperTransientError(f"ScraperAPI HTTP {code}") from e
+        logger.warning("ScraperAPI failed to scrape %s: HTTP %d", url, code)
+        return None
+
+
+def _scrape_url(url: str) -> Optional[str]:
+    """
+    Scrape URL with Crawl4AI (free), fallback to ScraperAPI if needed.
+    Returns markdown/text content.
+    """
+    # Try Crawl4AI first (free, better for LLMs)
+    try:
+        content = asyncio.run(_scrape_with_crawl4ai(url))
+        if content:
+            return content
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Crawl4AI failed for %s, trying ScraperAPI fallback: %s", url, e)
+
+    # Fallback to ScraperAPI (paid, but handles tough sites)
+    return _scrape_with_scraperapi(url)
+
+
 def scrape_website(domain: str) -> Optional[WebsiteIntelligence]:
     """
     Scrape company website and use LLM to extract sales intelligence.
 
     Scrapes homepage + key pages (about, pricing, careers, etc.)
-    and analyzes content with Gemini LLM.
+    using Crawl4AI (free) with ScraperAPI fallback, then analyzes
+    content with Gemini LLM.
     """
     settings = get_settings()
-
-    if not settings.SCRAPER_API_KEY:
-        logger.warning("SCRAPER_API_KEY not set, skipping website scraping")
-        return None
 
     if not settings.ENABLE_WEBSITE_SCRAPING:
         logger.info("Website scraping disabled (ENABLE_WEBSITE_SCRAPING=false)")
         return None
 
     homepage_url = f"https://{domain}"
-    logger.info("Scraping website: %s", homepage_url)
+    logger.info("Scraping website: %s (Crawl4AI + ScraperAPI fallback)", homepage_url)
 
     # Scrape homepage
-    try:
-        scraper_url = _scraper_api_url(homepage_url)
-        with httpx.Client(timeout=60.0) as client:
-            resp = client.get(scraper_url)
-            resp.raise_for_status()
-            homepage_html = resp.text
-    except (httpx.TimeoutException, httpx.NetworkError) as e:
-        raise ScraperTransientError(f"Timeout scraping {homepage_url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        code = e.response.status_code
-        if code == 429 or 500 <= code <= 599:
-            raise ScraperTransientError(f"ScraperAPI HTTP {code}") from e
-        logger.warning("Failed to scrape %s: HTTP %d", homepage_url, code)
+    homepage_content = _scrape_url(homepage_url)
+    if not homepage_content:
+        logger.warning("Failed to scrape homepage: %s", homepage_url)
         return None
 
-    homepage_text = _extract_text_from_html(homepage_html)
-    logger.info("Scraped homepage: %s (%d chars)", homepage_url, len(homepage_text))
+    logger.info("Scraped homepage: %s (%d chars)", homepage_url, len(homepage_content))
 
-    # Discover and scrape key pages
-    key_pages = _discover_key_pages(domain, homepage_html)
-    page_contents = {"homepage": homepage_text}
-
-    # Limit number of pages to scrape
-    max_pages = min(settings.SCRAPER_MAX_PAGES - 1, len(key_pages))  # -1 for homepage
-    scraped_count = 0
-
-    for page_type, page_url in list(key_pages.items())[:max_pages]:
-        try:
-            scraper_url = _scraper_api_url(page_url)
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.get(scraper_url)
-                resp.raise_for_status()
-                page_html = resp.text
-            page_text = _extract_text_from_html(page_html)
-            page_contents[page_type] = page_text
-            scraped_count += 1
-            logger.info("Scraped %s page: %s (%d chars)", page_type, page_url, len(page_text))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to scrape %s page (%s): %s", page_type, page_url, e)
-
-    logger.info("Scraped %d total pages for %s", scraped_count + 1, domain)
+    # For now, just use homepage content (Crawl4AI already extracts clean content)
+    # In future, could discover and scrape key pages too
+    page_contents = {"homepage": homepage_content}
 
     # Combine all page content for LLM analysis
     combined_text = ""
