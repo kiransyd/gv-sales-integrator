@@ -10,16 +10,22 @@ from app.services.calendly_service import (
 )
 from app.services.event_store_service import load_event
 from app.services.llm_service import calendly_lead_intel
+from app.services.slack_service import notify_demo_booked, notify_demo_canceled, notify_enrichment_completed
 from app.services.zoho_service import create_note, update_lead, upsert_lead_by_email
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-def _auto_enrich_lead(email: str, lead_id: str) -> None:
+def _auto_enrich_lead(email: str, lead_id: str, company: str = "") -> None:
     """
     Auto-enrich lead with Apollo + Website intelligence (if enabled).
     This is a best-effort enrichment - failures are logged but don't fail the main job.
+    
+    Args:
+        email: Lead email address
+        lead_id: Zoho Lead ID
+        company: Company name (optional, for Slack notifications)
     """
     from app.jobs.enrich_jobs import _build_enrichment_note, _build_zoho_payload_from_enrichment, enrich_lead_by_email
 
@@ -64,6 +70,14 @@ def _auto_enrich_lead(email: str, lead_id: str) -> None:
                 upload_lead_photo(lead_id, logo_data, filename=f"{domain}_logo.png")
 
         logger.info("Auto-enrichment complete for: %s (%d sources)", email, len(enrichment.data_sources))
+
+        # Send Slack notification
+        notify_enrichment_completed(
+            email=email,
+            company=company,
+            data_sources=enrichment.data_sources,
+            lead_id=lead_id,
+        )
 
     except Exception as e:  # noqa: BLE001
         # Log but don't fail the main Calendly job
@@ -114,8 +128,20 @@ def _process_created(ctx: JobContext) -> None:
         note_lines.append(intel_text)
     create_note(lead_id, note_title, "\n".join(note_lines).strip())
 
+    # Send Slack notification
+    demo_dt_str = info.demo_datetime or "Not specified"
+    if intel.demo_datetime_local and intel.demo_datetime_local != "Not discussed":
+        demo_dt_str = intel.demo_datetime_local
+    notify_demo_booked(
+        email=info.email,
+        name=info.name or "",
+        company=intel.company or "",
+        demo_datetime=demo_dt_str,
+        lead_id=lead_id,
+    )
+
     # Auto-enrich lead with Apollo + Website intelligence (if enabled)
-    _auto_enrich_lead(info.email, lead_id)
+    _auto_enrich_lead(info.email, lead_id, company=intel.company or "")
 
 
 def _process_canceled(ctx: JobContext) -> None:
@@ -141,6 +167,14 @@ def _process_canceled(ctx: JobContext) -> None:
         lead_id,
         "Calendly Demo Canceled",
         f"Calendly cancellation received.\nInvitee: {info.email}\nInvitee URI: {info.invitee_uri}".strip(),
+    )
+
+    # Send Slack notification
+    notify_demo_canceled(
+        email=info.email,
+        name=info.name or "",
+        company="",  # Company not extracted for canceled events
+        lead_id=lead_id,
     )
 
 

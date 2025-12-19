@@ -124,9 +124,13 @@ def run_event_job(event_id: str, handler: Callable[[JobContext], T]) -> T:
             # Alert only when retries are exhausted.
             if retries_left == 0:
                 msg = (
-                    f"Integrations job failed (terminal after retries): source={ctx.source} "
-                    f"event_type={ctx.event_type} external_id={ctx.external_id} "
-                    f"event_id={ctx.event_id} lead_email={ctx.lead_email or 'unknown'} error={e}"
+                    f"*❌ Job Failed (Terminal After Retries)*\n\n"
+                    f"*Source*: {ctx.source}\n"
+                    f"*Event Type*: {ctx.event_type}\n"
+                    f"*External ID*: {ctx.external_id}\n"
+                    f"*Event ID*: {ctx.event_id}\n"
+                    f"*Lead Email*: {ctx.lead_email or 'unknown'}\n"
+                    f"*Error*: {e}"
                 )
                 send_slack_alert(text=msg)
             raise
@@ -134,9 +138,13 @@ def run_event_job(event_id: str, handler: Callable[[JobContext], T]) -> T:
         # Permanent failure: mark failed, alert, and DO NOT raise (prevents RQ Retry from rescheduling).
         set_event_status(ctx.event_id, "failed", last_error=str(e))
         msg = (
-            f"Integrations job failed (permanent): source={ctx.source} "
-            f"event_type={ctx.event_type} external_id={ctx.external_id} "
-            f"event_id={ctx.event_id} lead_email={ctx.lead_email or 'unknown'} error={e}"
+            f"*❌ Job Failed (Permanent Error)*\n\n"
+            f"*Source*: {ctx.source}\n"
+            f"*Event Type*: {ctx.event_type}\n"
+            f"*External ID*: {ctx.external_id}\n"
+            f"*Event ID*: {ctx.event_id}\n"
+            f"*Lead Email*: {ctx.lead_email or 'unknown'}\n"
+            f"*Error*: {e}"
         )
         send_slack_alert(text=msg)
         # type: ignore[return-value]

@@ -9,21 +9,30 @@ from app.services.apollo_service import ApolloTransientError, enrich_company, en
 from app.services.brandfetch_service import fetch_company_logo
 from app.services.event_store_service import load_event
 from app.services.scraper_service import ScraperTransientError, scrape_website
-from app.services.zoho_service import create_note, find_lead_by_email, update_lead, upload_lead_photo
+from app.services.zoho_service import create_note, upsert_lead_by_email, upload_lead_photo
 from app.settings import get_settings
 from app.util.text_format import extract_domain_from_email
 
 logger = logging.getLogger(__name__)
 
 
-def _build_zoho_payload_from_enrichment(enrichment: EnrichmentResult) -> dict[str, str]:
-    """Build Zoho Lead update payload from enrichment result"""
+def _build_zoho_payload_from_enrichment(enrichment: EnrichmentResult, email: str) -> dict[str, str]:
+    """Build Zoho Lead payload from enrichment result (for create or update)"""
     settings = get_settings()
     payload = {}
 
-    # Apollo Person fields
+    # Ensure email is always set
+    payload["Email"] = email
+
+    # Apollo Person fields (including name fields for lead creation)
     if enrichment.person_data:
         person = enrichment.person_data
+        # Add name fields for lead creation
+        if person.first_name:
+            payload["First_Name"] = person.first_name
+        if person.last_name:
+            payload["Last_Name"] = person.last_name
+        # Add enrichment fields
         if person.title and settings.ZCF_APOLLO_JOB_TITLE:
             payload[settings.ZCF_APOLLO_JOB_TITLE] = person.title
         if person.seniority and settings.ZCF_APOLLO_SENIORITY:
@@ -33,12 +42,15 @@ def _build_zoho_payload_from_enrichment(enrichment: EnrichmentResult) -> dict[st
         if person.linkedin_url and settings.ZCF_APOLLO_LINKEDIN_URL:
             payload[settings.ZCF_APOLLO_LINKEDIN_URL] = person.linkedin_url
         if person.phone_numbers and settings.ZCF_APOLLO_PHONE:
-            # Use first phone number
             payload[settings.ZCF_APOLLO_PHONE] = person.phone_numbers[0]
 
-    # Apollo Company fields
+    # Apollo Company fields (including company name for lead creation)
     if enrichment.company_data:
         company = enrichment.company_data
+        # Add company name for lead creation
+        if company.name:
+            payload["Company"] = company.name
+        # Add enrichment fields
         if company.employee_count and settings.ZCF_APOLLO_COMPANY_SIZE:
             payload[settings.ZCF_APOLLO_COMPANY_SIZE] = company.employee_count
         if company.revenue and settings.ZCF_APOLLO_COMPANY_REVENUE:
@@ -52,8 +64,14 @@ def _build_zoho_payload_from_enrichment(enrichment: EnrichmentResult) -> dict[st
         if company.funding_total and settings.ZCF_APOLLO_COMPANY_FUNDING_TOTAL:
             payload[settings.ZCF_APOLLO_COMPANY_FUNDING_TOTAL] = company.funding_total
         if company.technologies and settings.ZCF_APOLLO_TECH_STACK:
-            # Format tech stack as comma-separated list
-            payload[settings.ZCF_APOLLO_TECH_STACK] = ", ".join(company.technologies[:10])  # Limit to 10
+            payload[settings.ZCF_APOLLO_TECH_STACK] = ", ".join(company.technologies[:10])
+
+    # Ensure minimum required fields for lead creation (Zoho requires Last_Name)
+    if not payload.get("Last_Name"):
+        # Extract domain from email as fallback
+        domain = email.split("@")[1] if "@" in email else "Unknown"
+        payload["Last_Name"] = domain.split(".")[0].title()
+        logger.info("No last name found in enrichment, using domain as Last_Name: %s", payload["Last_Name"])
 
     return payload
 
@@ -217,7 +235,7 @@ def enrich_lead_by_email(email: str) -> EnrichmentResult:
 
 
 def _process_manual_enrich(ctx: JobContext) -> None:
-    """Process manual enrichment request"""
+    """Process manual enrichment request - creates lead if doesn't exist"""
     ev = load_event(ctx.event_id)
     if ev is None:
         raise ValueError("Event not found")
@@ -227,12 +245,6 @@ def _process_manual_enrich(ctx: JobContext) -> None:
     lead_id = ev.payload.get("lead_id")
 
     if not email:
-        # If no email provided, try to fetch from Zoho using lead_id
-        if lead_id:
-            existing = find_lead_by_email("")  # We don't have email yet
-            # This won't work - we need to fetch lead by ID first
-            # For now, require email in payload
-            raise ValueError("Email is required in enrichment request")
         raise ValueError("Email is required in enrichment request")
 
     # Perform enrichment
@@ -240,26 +252,35 @@ def _process_manual_enrich(ctx: JobContext) -> None:
 
     if not enrichment.data_sources:
         logger.warning("No enrichment data found for: %s", email)
+        # Still create lead with minimal data if no enrichment found
+        minimal_payload = {
+            "Email": email,
+            "Last_Name": email.split("@")[0].title() if "@" in email else "Lead",
+        }
+        lead_id_str = upsert_lead_by_email(email, minimal_payload)
+        logger.info("Created minimal lead (no enrichment data): %s (lead_id: %s)", email, lead_id_str)
         return
 
-    # Build Zoho update payload
-    zoho_payload = _build_zoho_payload_from_enrichment(enrichment)
+    # Build Zoho payload from enrichment (includes name, company, and enrichment fields)
+    zoho_payload = _build_zoho_payload_from_enrichment(enrichment, email)
 
-    # Update Zoho lead (or create if doesn't exist)
-    existing = find_lead_by_email(email)
-    if existing and isinstance(existing, dict) and existing.get("id"):
-        lead_id_str = str(existing["id"])
-        if zoho_payload:
-            update_lead(lead_id_str, zoho_payload)
-    else:
-        logger.warning("Lead not found in Zoho for enrichment: %s", email)
-        # Could create lead here, but for manual enrichment we expect lead to exist
-        return
+    # Upsert lead (creates if doesn't exist, updates if exists)
+    lead_id_str = upsert_lead_by_email(email, zoho_payload)
+    logger.info("Lead upserted (created or updated): %s (lead_id: %s)", email, lead_id_str)
 
     # Create enrichment note
     note_title = "Lead Enrichment (Apollo + Website)"
     note_content = _build_enrichment_note(enrichment)
     create_note(lead_id_str, note_title, note_content)
+
+    # Fetch and upload company logo (best effort)
+    if enrichment.company_data and enrichment.company_data.domain:
+        try:
+            logo_data = fetch_company_logo(enrichment.company_data.domain)
+            if logo_data:
+                upload_lead_photo(lead_id_str, logo_data, filename=f"{enrichment.company_data.domain}_logo.png")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to upload logo for %s: %s", email, e)
 
     logger.info("Lead enrichment complete: %s (%d sources)", email, len(enrichment.data_sources))
 

@@ -13,6 +13,7 @@ from app.services.readai_service import (
     select_best_external_attendee_email,
     today_ymd,
 )
+from app.services.slack_service import notify_demo_completed
 from app.services.zoho_service import create_note, create_task, find_lead_by_email, upsert_lead_by_email, update_lead
 from app.settings import get_settings
 from app.util.time import next_business_day
@@ -217,6 +218,20 @@ def _process_meeting_completed(ctx: JobContext) -> None:
         due = next_business_day().isoformat()
         desc = f"Next steps:\n{getattr(meddic, 'next_steps', '')}".strip()
         create_task(lead_id=lead_id, subject="Follow up after demo", due_date=due, description=desc)
+
+    # Send Slack notification
+    # Extract name and company from existing lead or attendees
+    name = existing_first + " " + existing_last if existing_first or existing_last else ""
+    company = existing.get("Company", "") if existing else ""
+    meddic_confidence = getattr(meddic, "confidence", None)
+    notify_demo_completed(
+        email=email,
+        name=name.strip() if name else "",
+        company=company,
+        meeting_duration=duration,
+        meddic_confidence=str(meddic_confidence) if meddic_confidence else None,
+        lead_id=lead_id,
+    )
 
 
 def process_readai_meeting_completed(event_id: str) -> None:

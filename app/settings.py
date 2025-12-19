@@ -93,6 +93,10 @@ class Settings(BaseSettings):
 
     # Slack
     SLACK_WEBHOOK_URL: str = Field(default="")
+    SLACK_FORMAT_MODE: str = Field(
+        default="text",
+        description="Slack message format: 'text' (markdown, default, most compatible), 'blocks' (Block Kit), or 'attachments' (legacy). Note: All notifications now use markdown format regardless of this setting."
+    )
 
     # Optional
     CREATE_FOLLOWUP_TASK: bool = Field(default=False)
