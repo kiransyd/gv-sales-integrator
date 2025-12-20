@@ -15,7 +15,7 @@ def send_slack_alert(
     text: str,
     blocks: Optional[list[dict[str, Any]]] = None,
     attachments: Optional[list[dict[str, Any]]] = None,
-) -> None:
+) -> bool:
     """
     Send a basic Slack alert via webhook using markdown format.
     
@@ -27,11 +27,14 @@ def send_slack_alert(
         text: Markdown-formatted message text
         blocks: Optional Slack Block Kit blocks (deprecated, not used)
         attachments: Optional Slack legacy attachments (deprecated, not used)
+    
+    Returns:
+        True if message was sent successfully, False otherwise
     """
     settings = get_settings()
     if not settings.SLACK_WEBHOOK_URL:
         logger.warning("Slack webhook not configured; skipping alert: %s", text)
-        return
+        return False
 
     # Always use plain text with markdown for maximum compatibility
     # This works reliably through intermediaries like Pabbly
@@ -41,9 +44,11 @@ def send_slack_alert(
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(settings.SLACK_WEBHOOK_URL, json=payload)
             resp.raise_for_status()
+            return True
     except Exception as e:  # noqa: BLE001
         # Never crash the job just because Slack failed.
         logger.exception("Failed to send Slack alert: %s", e)
+        return False
 
 
 def _convert_blocks_to_attachments(text: str, blocks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -117,7 +122,7 @@ def send_slack_event(
     message: str,
     color: str = "good",  # "good" (green), "warning" (yellow), "danger" (red)
     fields: Optional[list[dict[str, str]]] = None,
-) -> None:
+) -> bool:
     """
     Send a formatted Slack event notification using markdown format.
     
@@ -129,15 +134,18 @@ def send_slack_event(
         message: Main message text (supports markdown)
         color: Attachment color ("good", "warning", "danger") - used if format mode supports it
         fields: Optional list of field dicts with "title" and "value" keys
+    
+    Returns:
+        True if message was sent successfully, False otherwise
     """
     settings = get_settings()
     if not settings.SLACK_WEBHOOK_URL:
         logger.debug("Slack webhook not configured; skipping event: %s", title)
-        return
+        return False
 
     # Always use markdown text format for maximum compatibility
     text = _format_text_message(title, message, fields)
-    send_slack_alert(text=text)
+    return send_slack_alert(text=text)
 
 
 # Convenience functions for common events
@@ -292,7 +300,7 @@ def notify_expansion_opportunity(
     action: str,
     priority: str,
     lead_id: str | None = None,
-) -> None:
+) -> bool:
     """
     Send Slack notification for expansion signal detection.
 
@@ -337,7 +345,7 @@ def notify_expansion_opportunity(
     if lead_id:
         fields.append({"title": "Zoho Lead ID", "value": lead_id})
 
-    send_slack_event(
+    return send_slack_event(
         title=f"{emoji} Expansion Opportunity: {signal_title}",
         message=f"Detected {priority} priority expansion signal for *{company_name}*",
         color=color,

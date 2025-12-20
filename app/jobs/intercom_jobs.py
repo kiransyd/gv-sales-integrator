@@ -330,7 +330,7 @@ def _process_company_updated(ctx: JobContext) -> None:
         # Send Slack notification for high-priority signals
         if signal.priority in ["critical", "high"]:
             try:
-                notify_expansion_opportunity(
+                success = notify_expansion_opportunity(
                     company_name=company_name,
                     contact_email=contact_email or "No primary contact",
                     signal_type=signal.signal_type,
@@ -339,9 +339,12 @@ def _process_company_updated(ctx: JobContext) -> None:
                     priority=signal.priority,
                     lead_id=lead_id,
                 )
-                logger.info("Sent Slack notification for signal: %s", signal.signal_type)
+                if success:
+                    logger.info("Sent Slack notification for signal: %s", signal.signal_type)
+                else:
+                    logger.warning("Failed to send Slack notification for signal: %s (check webhook URL)", signal.signal_type)
             except Exception as e:  # noqa: BLE001
-                logger.error("Failed to send Slack notification for signal %s: %s", signal.signal_type, e)
+                logger.error("Exception sending Slack notification for signal %s: %s", signal.signal_type, e)
 
 
 def process_company_updated(event_id: str) -> None:
