@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from app.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _get(d: dict[str, Any], *keys: str) -> Any:
