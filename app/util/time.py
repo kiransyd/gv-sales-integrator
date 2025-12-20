@@ -15,3 +15,4 @@ def next_business_day(d: date | None = None) -> date:
 
 
 
+

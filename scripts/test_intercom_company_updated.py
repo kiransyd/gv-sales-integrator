@@ -87,97 +87,20 @@ def build_company_updated_payload(
 
 
 def get_test_scenarios() -> dict[str, dict]:
-    """Get predefined test scenarios for different expansion signals"""
+    """Get predefined test scenarios for different expansion signals
+    
+    Note: Only trial_engaged_user signal is enabled. All other signals have been disabled.
+    """
     now = int(time.time())
     
     return {
-        "team_at_capacity": {
-            "company_id": "test_company_capacity_001",
-            "company_name": "Test Company - At Capacity",
-            "user_count": 10,
-            "custom_attributes": {
-                "gv_no_of_members": 10,
-                "gv_total_active_projects": 50,
-                "gv_projects_allowed": 1000,
-                "gv_subscription_plan": "Team Yearly",
-                "gv_subscription_status": "paid",
-                "gv_subscription_exp": "12/2026",
-                "gv_subscription_exp_in_sec": now + (180 * 24 * 60 * 60),  # 180 days from now
-                "gv_checklists": 0,
-            },
-            "expected_signals": ["team_at_capacity"],
-        },
-        "team_approaching_capacity": {
-            "company_id": "test_company_approaching_001",
-            "company_name": "Test Company - Approaching Capacity",
-            "user_count": 8,
-            "custom_attributes": {
-                "gv_no_of_members": 8,
-                "gv_total_active_projects": 45,
-                "gv_projects_allowed": 1000,
-                "gv_subscription_plan": "Team Yearly",
-                "gv_subscription_status": "paid",
-                "gv_subscription_exp": "12/2026",
-                "gv_subscription_exp_in_sec": now + (200 * 24 * 60 * 60),
-                "gv_checklists": 1,
-            },
-            "expected_signals": ["team_approaching_capacity"],
-        },
-        "power_user": {
-            "company_id": "test_company_power_001",
-            "company_name": "Test Company - Power User",
-            "user_count": 5,
-            "custom_attributes": {
-                "gv_no_of_members": 5,
-                "gv_total_active_projects": 120,  # High project count
-                "gv_projects_allowed": 1000,
-                "gv_subscription_plan": "PRO - Yearly",
-                "gv_subscription_status": "paid",
-                "gv_subscription_exp": "12/2026",
-                "gv_subscription_exp_in_sec": now + (200 * 24 * 60 * 60),
-                "gv_checklists": 2,
-            },
-            "expected_signals": ["power_user_projects"],
-        },
-        "subscription_expiring": {
-            "company_id": "test_company_expiring_001",
-            "company_name": "Test Company - Expiring Soon",
-            "user_count": 3,
-            "custom_attributes": {
-                "gv_no_of_members": 3,
-                "gv_total_active_projects": 15,
-                "gv_projects_allowed": 250,
-                "gv_subscription_plan": "PRO - Yearly",
-                "gv_subscription_status": "paid",
-                "gv_subscription_exp": "2/2026",
-                "gv_subscription_exp_in_sec": now + (45 * 24 * 60 * 60),  # 45 days from now
-                "gv_checklists": 0,
-            },
-            "expected_signals": ["subscription_expiring"],
-        },
-        "multiple_signals": {
-            "company_id": "test_company_multi_001",
-            "company_name": "Test Company - Multiple Signals",
-            "user_count": 11,
-            "custom_attributes": {
-                "gv_no_of_members": 11,
-                "gv_total_active_projects": 150,  # Power user
-                "gv_projects_allowed": 250,
-                "gv_subscription_plan": "PRO - Yearly",
-                "gv_subscription_status": "paid",
-                "gv_subscription_exp": "3/2026",
-                "gv_subscription_exp_in_sec": now + (60 * 24 * 60 * 60),  # 60 days from now
-                "gv_checklists": 0,
-            },
-            "expected_signals": ["power_user_projects", "project_limit_approaching", "subscription_expiring", "low_feature_adoption"],
-        },
         "trial_engaged": {
             "company_id": "test_company_trial_001",
             "company_name": "Test Company - Engaged Trial",
             "user_count": 2,
             "custom_attributes": {
                 "gv_no_of_members": 2,
-                "gv_total_active_projects": 2,  # 2/3 projects (trial limit)
+                "gv_total_active_projects": 2,  # 2+ projects AND 2+ team members
                 "gv_projects_allowed": 3,
                 "gv_subscription_plan": "Trial",
                 "gv_subscription_status": "trial",
@@ -187,21 +110,35 @@ def get_test_scenarios() -> dict[str, dict]:
             },
             "expected_signals": ["trial_engaged_user"],
         },
-        "none": {
-            "company_id": "test_company_none_001",
-            "company_name": "Test Company - No Signals",
+        "trial_not_engaged": {
+            "company_id": "test_company_trial_002",
+            "company_name": "Test Company - Trial Not Engaged",
             "user_count": 1,
             "custom_attributes": {
-                "gv_no_of_members": 1,
-                "gv_total_active_projects": 0,
-                "gv_projects_allowed": 250,
-                "gv_subscription_plan": "PRO - Yearly",
-                "gv_subscription_status": "paid",
-                "gv_subscription_exp": "12/2026",
-                "gv_subscription_exp_in_sec": now + (365 * 24 * 60 * 60),  # 1 year from now
+                "gv_no_of_members": 1,  # Only 1 team member (needs 2+)
+                "gv_total_active_projects": 1,  # Only 1 project (needs 2+)
+                "gv_projects_allowed": 3,
+                "gv_subscription_plan": "Trial",
+                "gv_subscription_status": "trial",
+                "gv_subscription_exp_in_sec": now + (5 * 24 * 60 * 60),
                 "gv_checklists": 0,
             },
-            "expected_signals": [],
+            "expected_signals": [],  # Doesn't meet criteria (2+ projects AND 2+ team members)
+        },
+        "paid_user": {
+            "company_id": "test_company_paid_001",
+            "company_name": "Test Company - Paid User",
+            "user_count": 5,
+            "custom_attributes": {
+                "gv_no_of_members": 5,
+                "gv_total_active_projects": 120,
+                "gv_projects_allowed": 1000,
+                "gv_subscription_plan": "PRO - Yearly",
+                "gv_subscription_status": "paid",
+                "gv_subscription_exp_in_sec": now + (200 * 24 * 60 * 60),
+                "gv_checklists": 2,
+            },
+            "expected_signals": [],  # Paid user signals disabled
         },
     }
 
@@ -246,14 +183,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Test team at capacity signal
-  python3 scripts/test_intercom_company_updated.py --signal team_at_capacity
-
-  # Test power user signal
-  python3 scripts/test_intercom_company_updated.py --signal power_user
+  # Test trial engaged signal (only enabled signal)
+  python3 scripts/test_intercom_company_updated.py --signal trial_engaged
 
   # Test with production URL
-  python3 scripts/test_intercom_company_updated.py --signal power_user --env .env.production
+  python3 scripts/test_intercom_company_updated.py --signal trial_engaged --env .env.production
 
   # List all available test scenarios
   python3 scripts/test_intercom_company_updated.py --list
@@ -262,7 +196,7 @@ Examples:
     parser.add_argument(
         "--signal",
         type=str,
-        help="Signal type to test: team_at_capacity, team_approaching_capacity, power_user, subscription_expiring, multiple_signals, trial_engaged, none",
+        help="Signal type to test: trial_engaged, trial_not_engaged, paid_user",
     )
     parser.add_argument(
         "--env",
@@ -352,9 +286,9 @@ Examples:
             user_count=scenario["user_count"],
         )
     else:
-        # Default: test team_at_capacity
-        print("ℹ️  No signal specified, using default: team_at_capacity\n")
-        scenario = scenarios["team_at_capacity"]
+        # Default: test trial_engaged
+        print("ℹ️  No signal specified, using default: trial_engaged\n")
+        scenario = scenarios["trial_engaged"]
         payload = build_company_updated_payload(
             company_id=scenario["company_id"],
             company_name=scenario["company_name"],
