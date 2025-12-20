@@ -1,0 +1,34 @@
+{
+  "type": "company",
+  "company_id": "6601601f89415a0015fea31c",
+  "id": "66311f0fa8475847eb9a281a",
+  "app_id": "wfkef3s2",
+  "name": "Bachan&#39;s",
+  "remote_created_at": 1711366175,
+  "created_at": 1714495247,
+  "updated_at": 1766188317,
+  "last_request_at": 1766187066,
+  "monthly_spend": 0,
+  "session_count": 210,
+  "user_count": 16,
+  "website": "bachans.com",
+  "tags": {
+    "type": "tag.list",
+    "tags": []
+  },
+  "segments": {
+    "type": "segment.list",
+    "segments": []
+  },
+  "plan": {},
+  "custom_attributes": {
+    "gv_checklists": 16,
+    "gv_no_of_members": 16,
+    "gv_projects_allowed": 250,
+    "gv_subscription_exp": "7/2026",
+    "gv_subscription_exp_in_sec": 1774733014,
+    "gv_subscription_plan": "PRO - Yearly",
+    "gv_subscription_status": "paid",
+    "gv_total_active_projects": 22
+  }
+}

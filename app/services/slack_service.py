@@ -284,6 +284,67 @@ def notify_support_qualified(
     )
 
 
+def notify_expansion_opportunity(
+    company_name: str,
+    contact_email: str,
+    signal_type: str,
+    details: str,
+    action: str,
+    priority: str,
+    lead_id: str | None = None,
+) -> None:
+    """
+    Send Slack notification for expansion signal detection.
+
+    Args:
+        company_name: Company name
+        contact_email: Primary contact email
+        signal_type: Type of signal detected
+        details: Signal details
+        action: Recommended action
+        priority: Signal priority (critical, high, medium, low)
+        lead_id: Zoho Lead ID (optional)
+    """
+    # Color based on priority
+    color_map = {
+        "critical": "danger",  # Red
+        "high": "warning",  # Orange
+        "medium": "good",  # Green
+        "low": "#808080",  # Gray
+    }
+    color = color_map.get(priority, "good")
+
+    # Emoji based on priority
+    emoji_map = {
+        "critical": "🔥",
+        "high": "🚀",
+        "medium": "⚡",
+        "low": "📌",
+    }
+    emoji = emoji_map.get(priority, "📌")
+
+    signal_title = signal_type.replace("_", " ").title()
+
+    fields = [
+        {"title": "Company", "value": company_name},
+        {"title": "Contact", "value": contact_email},
+        {"title": "Signal Type", "value": signal_title},
+        {"title": "Details", "value": details},
+        {"title": "Priority", "value": priority.upper()},
+        {"title": "Recommended Action", "value": action},
+    ]
+
+    if lead_id:
+        fields.append({"title": "Zoho Lead ID", "value": lead_id})
+
+    send_slack_event(
+        title=f"{emoji} Expansion Opportunity: {signal_title}",
+        message=f"Detected {priority} priority expansion signal for *{company_name}*",
+        color=color,
+        fields=fields,
+    )
+
+
 
 
 

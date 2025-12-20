@@ -213,3 +213,139 @@ def process_intercom_contact_tagged(event_id: str) -> None:
     Entry point for RQ job: process Intercom contact.lead.tag.created or contact.user.tag.created event.
     """
     run_event_job(event_id, _process_contact_tagged)
+
+
+def _process_company_updated(ctx: JobContext) -> None:
+    """
+    Process Intercom company.updated event.
+
+    1. Extract company data from webhook payload
+    2. Detect expansion signals
+    3. Find primary contact for the company
+    4. Create Zoho tasks for high-priority signals
+    5. Send Slack notifications for critical signals
+    """
+    from app.services.expansion_signal_service import detect_company_expansion_signals, format_signal_for_zoho_task
+    from app.services.slack_service import notify_expansion_opportunity
+    from app.services.zoho_service import create_task, upsert_lead_by_email
+
+    ev = load_event(ctx.event_id)
+    if ev is None:
+        raise ValueError("Event not found")
+
+    # Extract company data from payload
+    data = ev.payload.get("data", {})
+    company_data = data.get("item", {})
+
+    company_id = company_data.get("id", "")
+    company_name = company_data.get("name", "Unknown Company")
+    user_count = company_data.get("user_count", 0)
+
+    logger.info("Processing company.updated: %s (ID: %s, %d users)", company_name, company_id, user_count)
+
+    # Detect expansion signals
+    signals = detect_company_expansion_signals(company_data)
+
+    if not signals:
+        logger.info("No expansion signals detected for company: %s", company_name)
+        return
+
+    logger.info("Detected %d expansion signals for %s", len(signals), company_name)
+
+    # Try to find primary contact for this company
+    # We'll need to fetch from Intercom API to get contacts
+    from app.services.intercom_service import get_primary_contact_for_company, get_any_contact_for_company
+
+    primary_contact = get_primary_contact_for_company(company_id)
+
+    contact_email = None
+    contact_name = ""
+    lead_id = None
+
+    if primary_contact:
+        contact_email = primary_contact.get("email")
+        contact_name = primary_contact.get("name", "")
+
+        logger.info("Found primary contact for %s: %s (%s)", company_name, contact_name, contact_email)
+    else:
+        logger.warning("No primary contact found for company %s, trying to find any contact...", company_name)
+
+        # Fallback: Try to find ANY contact for this company
+        any_contact = get_any_contact_for_company(company_id)
+
+        if any_contact:
+            contact_email = any_contact.get("email")
+            contact_name = any_contact.get("name", "")
+            logger.info("Found fallback contact for %s: %s (%s)", company_name, contact_name, contact_email)
+        else:
+            logger.error(
+                "No contacts found for company %s - signals will be created but not linked to a lead",
+                company_name,
+            )
+
+    # Ensure lead exists in Zoho (if we have contact email)
+    if contact_email:
+        try:
+            lead_id = upsert_lead_by_email(
+                contact_email,
+                {
+                    "Company": company_name,
+                    "Last_Name": contact_name or "Unknown",
+                    "Lead_Source": "Intercom - Expansion Signal",
+                },
+            )
+            logger.info("Ensured Zoho lead exists: %s for %s", lead_id, contact_email)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to upsert lead for %s: %s", contact_email, e)
+            lead_id = None
+
+    # Process each signal
+    for signal in signals:
+        logger.info(
+            "Processing signal: %s (priority: %s) for %s",
+            signal.signal_type,
+            signal.priority,
+            company_name,
+        )
+
+        # Create Zoho task if needed
+        if signal.create_zoho_task and lead_id:
+            try:
+                task_payload = format_signal_for_zoho_task(
+                    signal=signal,
+                    company_name=company_name,
+                    company_id=company_id,
+                    contact_email=contact_email,
+                )
+
+                # Add Lead_Id to link task to lead
+                task_payload["$se_module"] = "Leads"
+                task_payload["Who_Id"] = lead_id
+
+                task_id = create_task(task_payload)
+                logger.info("Created Zoho task %s for signal: %s", task_id, signal.signal_type)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Failed to create Zoho task for signal %s: %s", signal.signal_type, e)
+
+        # Send Slack notification for high-priority signals
+        if signal.priority in ["critical", "high"]:
+            try:
+                notify_expansion_opportunity(
+                    company_name=company_name,
+                    contact_email=contact_email or "No primary contact",
+                    signal_type=signal.signal_type,
+                    details=signal.details,
+                    action=signal.action,
+                    priority=signal.priority,
+                    lead_id=lead_id,
+                )
+                logger.info("Sent Slack notification for signal: %s", signal.signal_type)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Failed to send Slack notification for signal %s: %s", signal.signal_type, e)
+
+
+def process_company_updated(event_id: str) -> None:
+    """
+    Entry point for RQ job: process Intercom company.updated event.
+    """
+    run_event_job(event_id, _process_company_updated)

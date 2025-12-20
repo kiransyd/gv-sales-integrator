@@ -346,3 +346,169 @@ def format_intercom_note_content(
                 parts.append(f"**{key}:** {value}")
 
     return "\n".join(parts)
+
+
+def get_primary_contact_for_company(company_id: str) -> dict | None:
+    """
+    Get the primary contact (user_type=primary) for a company.
+
+    Args:
+        company_id: Intercom company ID
+
+    Returns:
+        Contact data dict if found, None otherwise
+    """
+    import httpx
+
+    from app.settings import get_settings
+
+    settings = get_settings()
+
+    if not settings.INTERCOM_API_KEY:
+        logger.error("INTERCOM_API_KEY not configured")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {settings.INTERCOM_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Intercom-Version": "2.11",
+    }
+
+    try:
+        # Search for contacts in this company with user_type=primary
+        search_payload = {
+            "query": {
+                "operator": "AND",
+                "value": [
+                    {
+                        "field": "role",
+                        "operator": "=",
+                        "value": "user",
+                    },
+                    {
+                        "field": "custom_attributes.user_type",
+                        "operator": "=",
+                        "value": "primary",
+                    },
+                ],
+            },
+        }
+
+        response = httpx.post(
+            "https://api.intercom.io/contacts/search",
+            headers=headers,
+            json=search_payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        contacts = data.get("data", [])
+
+        # Filter by company ID (search API doesn't support company filter directly)
+        for contact in contacts:
+            companies = contact.get("companies", {}).get("data", [])
+            for company in companies:
+                if company.get("id") == company_id:
+                    logger.info("Found primary contact: %s for company %s", contact.get("email"), company_id)
+                    return contact
+
+        # Fallback: If no primary user, get first contact from company
+        logger.warning("No primary contact found for company %s, fetching first contact", company_id)
+
+        # Get company to find associated contacts
+        response = httpx.get(
+            f"https://api.intercom.io/companies/{company_id}",
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        # Note: Company object doesn't include full contact list
+        # We'd need to search contacts by company which isn't straightforward
+        # For now, return None if no primary user found
+        logger.warning("Could not find primary contact for company %s", company_id)
+        return None
+
+    except httpx.HTTPStatusError as e:
+        logger.error("Failed to fetch contact for company %s: %s", company_id, e.response.text)
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error fetching contact for company %s: %s", company_id, e)
+        return None
+
+
+def get_any_contact_for_company(company_id: str) -> dict | None:
+    """
+    Get ANY contact for a company (fallback when primary user not found).
+
+    Searches for any user role contact associated with the company.
+    This is used when no primary contact is found.
+
+    Args:
+        company_id: Intercom company ID
+
+    Returns:
+        Contact data dict if found, None otherwise
+    """
+    import httpx
+
+    from app.settings import get_settings
+
+    settings = get_settings()
+
+    if not settings.INTERCOM_API_KEY:
+        logger.error("INTERCOM_API_KEY not configured")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {settings.INTERCOM_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Intercom-Version": "2.11",
+    }
+
+    try:
+        # Search for any user role contacts (not leads/visitors)
+        search_payload = {
+            "query": {
+                "field": "role",
+                "operator": "=",
+                "value": "user",
+            },
+        }
+
+        response = httpx.post(
+            "https://api.intercom.io/contacts/search",
+            headers=headers,
+            json=search_payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        contacts = data.get("data", [])
+
+        # Filter by company ID (search API doesn't support company filter directly)
+        for contact in contacts:
+            companies = contact.get("companies", {}).get("data", [])
+            for company in companies:
+                if company.get("id") == company_id:
+                    logger.info(
+                        "Found fallback contact: %s (user_type: %s) for company %s",
+                        contact.get("email"),
+                        contact.get("custom_attributes", {}).get("user_type", "unknown"),
+                        company_id,
+                    )
+                    return contact
+
+        logger.warning("Could not find any contacts for company %s", company_id)
+        return None
+
+    except httpx.HTTPStatusError as e:
+        logger.error("Failed to fetch any contact for company %s: %s", company_id, e.response.text)
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error fetching any contact for company %s: %s", company_id, e)
+        return None

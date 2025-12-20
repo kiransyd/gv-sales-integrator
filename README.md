@@ -1,8 +1,8 @@
 # GoVisually Sales Intelligence Integrator
 
-**Automated sales intelligence for Calendly + Read.ai → Zoho CRM**
+**Automated sales intelligence for Calendly + Read.ai + Intercom → Zoho CRM**
 
-Receives **Calendly** and **Read.ai** webhooks, enriches leads with **Apollo.io**, **Crawl4AI** website scraping, and **Gemini LLM** analysis, then updates **Zoho CRM** with actionable sales intelligence including company logos.
+Receives **Calendly**, **Read.ai**, and **Intercom** webhooks, enriches leads with **Apollo.io**, **Crawl4AI** website scraping, and **Gemini LLM** analysis, then updates **Zoho CRM** with actionable sales intelligence including company logos.
 
 ## ✨ Features
 
@@ -22,6 +22,16 @@ Receives **Calendly** and **Read.ai** webhooks, enriches leads with **Apollo.io*
 ### 📊 **Read.ai Integration**
 - Post-demo MEDDIC analysis from meeting transcripts
 - Extracts: Metrics, Economic Buyer, Decision Criteria, Pain Points, Champion, Competition
+- Multi-attendee tracking with speaking stats and sample quotes
+
+### 🎯 **Intercom Integration** 🆕
+- Qualifies support contacts for sales outreach
+- Tag-based workflow (e.g., tag with "Lead" → creates Zoho lead)
+- Extracts 15+ fields: location, device info, plan type, tools used
+- Captures GoVisually usage patterns (version, user type, initial channel)
+- Maps competitive intelligence (current PM tool, proofing tool)
+- Direct link to Intercom conversation in Zoho notes
+- Auto-enrichment with Apollo + Website scraping
 
 ### 🎨 **Sales-Focused Intelligence**
 Website enrichment provides conversational, actionable notes:
@@ -50,6 +60,7 @@ cp .env.example .env
 - Zoho OAuth credentials (see `scripts/zoho_oauth_helper.md`)
 - `CALENDLY_SIGNING_KEY` (webhook authentication)
 - `READAI_SHARED_SECRET` (webhook authentication)
+- `INTERCOM_API_KEY` (for Intercom integration)
 - `APOLLO_API_KEY` (optional - for enrichment)
 - `BRAND_FETCH_API` (optional - for company logos)
 - `SLACK_WEBHOOK_URL` (optional - for failure alerts)
@@ -80,11 +91,29 @@ Secret: Set READAI_SHARED_SECRET in .env
 Header: X-ReadAI-Secret
 ```
 
+### Intercom 🆕
+```
+URL: {BASE_URL}/webhooks/intercom
+Events: contact.user.tag.created, contact.lead.tag.created
+Qualifying Tag: "Lead" (configurable via INTERCOM_QUALIFYING_TAGS)
+Secret: Set INTERCOM_WEBHOOK_SECRET in .env (optional)
+Header: X-Intercom-Signature
+```
+
+**Workflow:**
+1. Support team helps a customer in Intercom
+2. When ready for sales, tag contact with "Lead"
+3. Webhook triggers → Creates Zoho lead with:
+   - All Intercom data (location, plan type, tools used)
+   - Link to Intercom conversation
+   - Optional auto-enrichment with Apollo + website scraping
+
 ## 📡 API Endpoints
 
 ### Webhooks
 - `POST /webhooks/calendly` - Calendly webhook receiver
 - `POST /webhooks/readai` - Read.ai webhook receiver
+- `POST /webhooks/intercom` - Intercom webhook receiver 🆕
 
 ### Manual Operations
 - `POST /enrich/lead` - Manually enrich a lead by email
@@ -160,6 +189,7 @@ curl http://localhost:8000/debug/status | jq
 - BrandFetch: configured
 - Calendly: configured
 - Read.ai: configured
+- Intercom: configured 🆕
 - Website scraping: enabled, Crawl4AI + ScraperAPI status
 - Auto-enrichment: enabled
 
@@ -286,7 +316,7 @@ Use the printed HTTPS URL as `BASE_URL` in `.env`, then update webhook settings 
 ## 🏗️ Architecture
 
 ```
-Calendly/Read.ai Webhook
+Calendly/Read.ai/Intercom Webhook
     ↓
 FastAPI API (validates signature)
     ↓
@@ -309,7 +339,17 @@ RQ Worker (background processing)
 │ READ.AI FLOW:                       │
 │ 1. Extract MEDDIC with Gemini LLM   │
 │ 2. Update Zoho Lead                 │
-│ 3. Add meeting notes                │
+│ 3. Add meeting notes with attendees │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│ INTERCOM FLOW: 🆕                   │
+│ 1. Extract 15+ Intercom fields      │
+│ 2. Create/Update Zoho Lead          │
+│ 3. Auto-enrich:                     │
+│    - Apollo.io (optional)           │
+│    - Website scraping (optional)    │
+│ 4. Add detailed note with link      │
 └─────────────────────────────────────┘
     ↓
 Updated Zoho Lead with:
@@ -319,6 +359,7 @@ Updated Zoho Lead with:
 - Company logo
 - MEDDIC analysis
 - Meeting transcript
+- Intercom usage data
 ```
 
 ## 🔐 Security
@@ -327,11 +368,13 @@ Updated Zoho Lead with:
 - Incoming webhooks compute an idempotency key
 - Calendly: `calendly:{event_type}:{external_id}`
 - Read.ai: `readai:meeting_completed:{meeting_id}`
+- Intercom: `intercom:{topic}:{contact_id}:{created_at}` 🆕
 - Duplicate events are ignored (90-day TTL)
 
 ### Authentication
 - **Calendly**: HMAC signature verification (`CALENDLY_SIGNING_KEY`)
 - **Read.ai**: Shared secret header (`READAI_SHARED_SECRET`)
+- **Intercom**: HMAC SHA256 signature verification (optional via `INTERCOM_WEBHOOK_SECRET`) 🆕
 - **Manual endpoints**: API key header (`ENRICH_SECRET_KEY`)
 
 ### DRY_RUN Mode
@@ -375,10 +418,19 @@ Set `DRY_RUN=true` to test without writing to Zoho. Worker logs what it would se
 - `MEDDIC_Identified_Pain`, `MEDDIC_Champion`
 - `MEDDIC_Competition`, `MEDDIC_Confidence`
 
+### Intercom Fields (15+ fields) 🆕
+- `First_Name`, `Last_Name`, `Email`, `Phone`
+- `Company`, `Website`, `Industry`, `No_of_Employees`
+- `Country`, `State`, `City`
+- `Description` (includes plan type, GV version, user type, tools used)
+- Lead Source: "Intercom"
+- Lead Status: "Qualified" (configurable)
+
 ### Notes
-- Auto-Enrichment note (Apollo + Website intelligence)
-- Meeting transcript note
-- MEDDIC analysis note
+- **Calendly**: Demo booking details with Q&A
+- **Auto-Enrichment**: Apollo + Website intelligence
+- **Read.ai**: MEDDIC analysis + meeting transcript + attendee tracking
+- **Intercom**: Contact qualification details with usage data 🆕
 
 ### Photos
 - Company logo (uploaded to Lead photo field via BrandFetch)
@@ -493,6 +545,7 @@ Real-time company news powered by Google Search integration:
 - `ARCHITECTURE.md` - System architecture and design decisions
 - `DEPLOYMENT.md` - Deployment guide for production
 - `APOLLO_ENRICHMENT.md` - Apollo.io integration details
+- `docs/INTERCOM_INTEGRATION.md` - Intercom → Zoho integration guide 🆕
 - `scripts/zoho_oauth_helper.md` - Zoho OAuth setup guide
 - `docs/CALENDLY_WEBHOOK_PAYLOAD.md` - Calendly webhook payload reference
 
@@ -519,5 +572,5 @@ For issues or questions:
 
 ---
 
-**Built with:** FastAPI, RQ, Redis, Gemini LLM, Crawl4AI, Apollo.io, BrandFetch, Zoho CRM API
+**Built with:** FastAPI, RQ, Redis, Gemini LLM, Crawl4AI, Apollo.io, BrandFetch, Intercom API, Zoho CRM API
 

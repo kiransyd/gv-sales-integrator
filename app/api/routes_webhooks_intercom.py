@@ -56,7 +56,10 @@ def verify_intercom_signature(
 async def intercom_webhook(request: Request, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """
     Handle Intercom webhooks.
-    Currently supports: contact.lead.tag.created, contact.user.tag.created
+    Supports:
+    - contact.lead.tag.created
+    - contact.user.tag.created
+    - company.updated (expansion signal detection)
     """
     raw = await request.body()
 
@@ -77,17 +80,92 @@ async def intercom_webhook(request: Request, settings: Settings = Depends(get_se
         logger.error("Intercom webhook: Invalid JSON. Error: %s, Body preview: %s", e, raw[:500] if raw else "empty")
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
-    # Extract topic and contact info
+    # Extract topic and metadata
     topic = payload.get("topic", "")
     created_at = payload.get("created_at", 0)
 
     logger.debug("Intercom webhook: topic=%s, created_at=%s", topic, created_at)
 
-    # Support both contact.lead.tag.created and contact.user.tag.created
-    supported_topics = ["contact.lead.tag.created", "contact.user.tag.created"]
+    # Check if topic is supported
+    supported_topics = ["contact.lead.tag.created", "contact.user.tag.created", "company.updated"]
     if topic not in supported_topics:
         logger.info("Intercom webhook ignored: unsupported topic=%s (supported: %s)", topic, supported_topics)
         return {"ok": True, "ignored": True, "reason": "unsupported_topic", "topic": topic}
+
+    # Route to appropriate handler based on topic
+    if topic == "company.updated":
+        return await _handle_company_updated(payload, settings)
+    else:
+        # Handle contact tag events (existing logic)
+        return await _handle_contact_tagged(payload, settings)
+
+
+async def _handle_company_updated(payload: dict, settings: Settings) -> dict[str, Any]:
+    """
+    Handle company.updated webhook.
+
+    Detects expansion signals from company usage data and creates Zoho tasks.
+    """
+    topic = payload.get("topic", "")
+    created_at = payload.get("created_at", 0)
+    data = payload.get("data", {})
+    item = data.get("item", {})
+
+    # Extract company info
+    company_id = item.get("id", "")
+    company_name = item.get("name", "")
+
+    if not company_id:
+        logger.error("Company updated webhook: Missing company ID")
+        raise HTTPException(status_code=400, detail="Missing company ID")
+
+    logger.info("Company updated: %s (ID: %s)", company_name, company_id)
+
+    # Build idempotency key based on company ID and updated_at timestamp
+    # This allows multiple updates to the same company over time
+    updated_at = item.get("updated_at", created_at)
+    external_id = f"{company_id}:{updated_at}"
+    idem_key = f"intercom:company.updated:{external_id}"
+    event_id = new_event_id()
+
+    acquired = try_acquire_idempotency_key(idempotency_key=idem_key, event_id=event_id)
+    if not acquired.acquired:
+        logger.debug("Duplicate company.updated webhook: %s", idem_key)
+        return {"ok": True, "duplicate": True, "event_id": acquired.existing_event_id}
+
+    store_incoming_event(
+        event_id=event_id,
+        source="intercom",
+        event_type=topic,
+        external_id=external_id,
+        idempotency_key=idem_key,
+        payload=payload,
+    )
+
+    # Enqueue job to process company expansion signals
+    func = "app.jobs.intercom_jobs.process_company_updated"
+
+    try:
+        q = get_queue()
+        q.enqueue(func, event_id, job_id=idem_key, retry=default_retry())
+        set_event_status(event_id, "queued")
+        logger.info("Queued company.updated job: %s for company %s", event_id, company_name)
+    except Exception as e:  # noqa: BLE001
+        release_idempotency_key(idem_key)
+        set_event_status(event_id, "failed", last_error=f"enqueue_failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to enqueue job") from e
+
+    return {"ok": True, "queued": True, "event_id": event_id, "idempotency_key": idem_key}
+
+
+async def _handle_contact_tagged(payload: dict, settings: Settings) -> dict[str, Any]:
+    """
+    Handle contact.lead.tag.created and contact.user.tag.created webhooks.
+
+    Existing logic for tag-based lead qualification.
+    """
+    topic = payload.get("topic", "")
+    created_at = payload.get("created_at", 0)
 
     # Extract contact ID and tag info for idempotency
     data = payload.get("data", {})
