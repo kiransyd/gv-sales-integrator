@@ -175,6 +175,33 @@ def find_lead_by_email(email: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def find_lead_by_company(company_name: str) -> Optional[dict[str, Any]]:
+    """
+    Find a Zoho lead by company name (exact match).
+    
+    Args:
+        company_name: Company name to search for
+        
+    Returns:
+        Lead dict if found, None otherwise
+    """
+    settings = get_settings()
+    if settings.DRY_RUN:
+        logger.info("DRY_RUN Zoho find_lead_by_company skipped: %s", company_name)
+        return None
+
+    # Search by Company field (exact match)
+    criteria = quote(f'(Company:equals:"{company_name}")', safe="():,=")
+    body = _request("GET", f"/{settings.ZOHO_LEADS_MODULE}/search?criteria={criteria}")
+    data = body.get("data") or []
+    if not data:
+        return None
+    if isinstance(data, list):
+        # Return the first match (most recent if sorted)
+        return data[0]
+    return None
+
+
 def list_module_fields(module_api_name: str) -> list[dict[str, Any]]:
     """
     Returns field metadata for a module, e.g. Leads.
@@ -266,6 +293,47 @@ def upsert_lead_by_email(email: str, payload: dict[str, Any]) -> str:
         lead_id = str(existing["id"])
         update_lead(lead_id, payload)
         return lead_id
+    return create_lead(payload)
+
+
+def upsert_lead_by_company(company_name: str, payload: dict[str, Any]) -> str:
+    """
+    Upsert a Zoho lead by company name.
+    
+    If a lead with this company name exists, update it.
+    Otherwise, create a new lead.
+    
+    Important: If updating an existing lead, preserves the existing Email field
+    to avoid overwriting the primary contact when multiple contacts from the same
+    company trigger signals.
+    
+    Args:
+        company_name: Company name to search for/create
+        payload: Lead data to create/update
+        
+    Returns:
+        Lead ID (existing or newly created)
+    """
+    existing = find_lead_by_company(company_name)
+    if existing and isinstance(existing, dict) and existing.get("id"):
+        lead_id = str(existing["id"])
+        logger.info("Found existing lead for company %s: %s", company_name, lead_id)
+        
+        # Preserve existing Email if the lead already has one
+        # This prevents overwriting the primary contact when multiple contacts trigger signals
+        # BUT: If existing lead has no email, use the new one
+        existing_email = existing.get("Email")
+        if existing_email and "Email" in payload:
+            logger.debug("Preserving existing email %s for lead %s (new email would be %s)", 
+                        existing_email, lead_id, payload.get("Email"))
+            # Remove Email from payload to preserve the existing one
+            payload = {k: v for k, v in payload.items() if k != "Email"}
+        elif not existing_email and "Email" in payload:
+            logger.debug("Setting email %s for lead %s (lead had no email)", payload.get("Email"), lead_id)
+        
+        update_lead(lead_id, payload)
+        return lead_id
+    logger.info("Creating new lead for company: %s", company_name)
     return create_lead(payload)
 
 

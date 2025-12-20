@@ -227,7 +227,7 @@ def _process_company_updated(ctx: JobContext) -> None:
     """
     from app.services.expansion_signal_service import detect_company_expansion_signals, format_signal_for_zoho_task
     from app.services.slack_service import notify_expansion_opportunity
-    from app.services.zoho_service import create_note, create_task, upsert_lead_by_email
+    from app.services.zoho_service import create_note, create_task, upsert_lead_by_company
 
     ev = load_event(ctx.event_id)
     if ev is None:
@@ -339,55 +339,84 @@ def _process_company_updated(ctx: JobContext) -> None:
         desc = lead_payload.get("Description", "")
         lead_payload["Description"] = desc + f"Subscription Expires: {subscription_exp}\n"
     
-    # Ensure lead exists in Zoho (if we have contact email)
-    if contact_email:
-        try:
-            lead_id = upsert_lead_by_email(contact_email, lead_payload)
-            logger.info("Ensured Zoho lead exists: %s for %s", lead_id, contact_email)
+    # Upsert lead by COMPANY (not email) to avoid duplicate leads for same company
+    # This ensures one lead per company, even if multiple contacts trigger signals
+    try:
+        lead_id = upsert_lead_by_company(company_name, lead_payload)
+        logger.info("Ensured Zoho lead exists for company %s: %s (primary contact: %s)", company_name, lead_id, contact_email or "None")
+        
+        # Create a note summarizing all detected expansion signals
+        # Use plain text formatting (Zoho Notes don't support Markdown)
+        if signals and lead_id:
+            from app.util.text_format import format_zoho_note_plain_text
             
-            # Create a note summarizing all detected expansion signals
-            if signals and lead_id:
-                note_parts = [
-                    "## Expansion Signals Detected",
-                    "",
-                    f"**Company:** {company_name}",
-                    f"**Intercom Company ID:** {company_id}",
-                    f"**User Count:** {user_count}",
-                    "",
-                    f"**Detected {len(signals)} expansion signal(s):**",
-                    "",
+            # Build sections for each signal
+            signal_sections = []
+            for signal in signals:
+                priority_emoji = {
+                    "critical": "🔥",
+                    "high": "🚀",
+                    "medium": "⚡",
+                    "low": "📌",
+                }.get(signal.priority, "📌")
+                
+                signal_title = f"{priority_emoji} {signal.signal_type.replace('_', ' ').title()} ({signal.priority.upper()})"
+                
+                items = [
+                    {"label": "Details", "value": signal.details},
+                    {"label": "Action", "value": signal.action},
                 ]
                 
-                for signal in signals:
-                    priority_emoji = {
-                        "critical": "🔥",
-                        "high": "🚀",
-                        "medium": "⚡",
-                        "low": "📌",
-                    }.get(signal.priority, "📌")
-                    
-                    note_parts.append(f"### {priority_emoji} {signal.signal_type.replace('_', ' ').title()} ({signal.priority.upper()})")
-                    note_parts.append(f"**Details:** {signal.details}")
-                    note_parts.append(f"**Action:** {signal.action}")
-                    if signal.talking_points:
-                        note_parts.append("**Talking Points:**")
-                        for point in signal.talking_points:
-                            note_parts.append(f"- {point}")
-                    if signal.metadata:
-                        note_parts.append("**Metrics:**")
-                        for key, value in signal.metadata.items():
-                            note_parts.append(f"- {key}: {value}")
-                    note_parts.append("")
+                if signal.talking_points:
+                    items.append({"label": "Talking Points", "value": ""})
+                    items.extend([{"label": "", "value": point} for point in signal.talking_points])
                 
-                note_parts.append(f"[View in Intercom](https://app.intercom.com/a/apps/wfkef3s2/companies/{company_id})")
+                if signal.metadata:
+                    items.append({"label": "Metrics", "value": ""})
+                    items.extend([{"label": "", "value": f"{key}: {value}"} for key, value in signal.metadata.items()])
                 
-                note_content = "\n".join(note_parts)
-                create_note(lead_id, "Expansion Signals", note_content)
-                logger.info("Created expansion signals note for lead: %s", lead_id)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to upsert lead for %s: %s", contact_email, e)
-            lead_id = None
-    else:
+                signal_sections.append({
+                    "title": signal_title,
+                    "items": items,
+                })
+            
+            # Build main sections
+            sections = [
+                {
+                    "title": "Company Information",
+                    "items": [
+                        {"label": "Company", "value": company_name},
+                        {"label": "Intercom Company ID", "value": company_id},
+                        {"label": "User Count", "value": str(user_count)},
+                    ],
+                },
+            ]
+            
+            if contact_email:
+                sections[0]["items"].append({
+                    "label": "Primary Contact",
+                    "value": f"{contact_name or 'Unknown'} ({contact_email})",
+                })
+            
+            sections.append({
+                "title": f"Detected {len(signals)} Expansion Signal(s)",
+                "items": [],
+            })
+            
+            # Add signal sections
+            sections.extend(signal_sections)
+            
+            # Format as plain text
+            note_content = format_zoho_note_plain_text(
+                title="Expansion Signals Detected",
+                sections=sections,
+                footer=f"View in Intercom: https://app.intercom.com/a/apps/wfkef3s2/companies/{company_id}",
+            )
+            
+            create_note(lead_id, "Expansion Signals", note_content)
+            logger.info("Created expansion signals note for lead: %s", lead_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to upsert lead for company %s: %s", company_name, e)
         lead_id = None
 
     # Process each signal
