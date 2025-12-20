@@ -227,7 +227,7 @@ def _process_company_updated(ctx: JobContext) -> None:
     """
     from app.services.expansion_signal_service import detect_company_expansion_signals, format_signal_for_zoho_task
     from app.services.slack_service import notify_expansion_opportunity
-    from app.services.zoho_service import create_task, upsert_lead_by_email
+    from app.services.zoho_service import create_note, create_task, upsert_lead_by_email
 
     ev = load_event(ctx.event_id)
     if ev is None:
@@ -283,21 +283,112 @@ def _process_company_updated(ctx: JobContext) -> None:
                 company_name,
             )
 
+    # Build enriched lead payload from company data
+    custom_attrs = company_data.get("custom_attributes", {})
+    
+    # Parse contact name
+    first_name = ""
+    last_name = contact_name or "Unknown"
+    if contact_name:
+        name_parts = contact_name.split(" ", 1)
+        if len(name_parts) == 2:
+            first_name, last_name = name_parts
+        elif len(name_parts) == 1:
+            first_name = name_parts[0]
+            last_name = ""
+    
+    # Build enriched lead payload
+    lead_payload = {
+        "Company": company_name,
+        "First_Name": first_name,
+        "Last_Name": last_name,
+        "Lead_Source": "Intercom - Expansion Signal",
+    }
+    
+    # Only add Email if we have a contact
+    if contact_email:
+        lead_payload["Email"] = contact_email
+    
+    # Add company metrics from Intercom
+    if user_count:
+        lead_payload["No_of_Employees"] = user_count
+    
+    # Add GoVisually-specific data
+    plan_type = custom_attrs.get("gv_subscription_plan", "")
+    if plan_type:
+        lead_payload["Description"] = f"Plan: {plan_type}\n"
+    
+    active_projects = custom_attrs.get("gv_total_active_projects", 0)
+    projects_allowed = custom_attrs.get("gv_projects_allowed", 0)
+    if active_projects or projects_allowed:
+        desc = lead_payload.get("Description", "")
+        lead_payload["Description"] = desc + f"Active Projects: {active_projects}/{projects_allowed}\n"
+    
+    team_size = custom_attrs.get("gv_no_of_members", 0)
+    if team_size:
+        desc = lead_payload.get("Description", "")
+        lead_payload["Description"] = desc + f"Team Size: {team_size}\n"
+    
+    subscription_status = custom_attrs.get("gv_subscription_status", "")
+    if subscription_status:
+        desc = lead_payload.get("Description", "")
+        lead_payload["Description"] = desc + f"Subscription Status: {subscription_status}\n"
+    
+    subscription_exp = custom_attrs.get("gv_subscription_exp", "")
+    if subscription_exp:
+        desc = lead_payload.get("Description", "")
+        lead_payload["Description"] = desc + f"Subscription Expires: {subscription_exp}\n"
+    
     # Ensure lead exists in Zoho (if we have contact email)
     if contact_email:
         try:
-            lead_id = upsert_lead_by_email(
-                contact_email,
-                {
-                    "Company": company_name,
-                    "Last_Name": contact_name or "Unknown",
-                    "Lead_Source": "Intercom - Expansion Signal",
-                },
-            )
+            lead_id = upsert_lead_by_email(contact_email, lead_payload)
             logger.info("Ensured Zoho lead exists: %s for %s", lead_id, contact_email)
+            
+            # Create a note summarizing all detected expansion signals
+            if signals and lead_id:
+                note_parts = [
+                    "## Expansion Signals Detected",
+                    "",
+                    f"**Company:** {company_name}",
+                    f"**Intercom Company ID:** {company_id}",
+                    f"**User Count:** {user_count}",
+                    "",
+                    f"**Detected {len(signals)} expansion signal(s):**",
+                    "",
+                ]
+                
+                for signal in signals:
+                    priority_emoji = {
+                        "critical": "🔥",
+                        "high": "🚀",
+                        "medium": "⚡",
+                        "low": "📌",
+                    }.get(signal.priority, "📌")
+                    
+                    note_parts.append(f"### {priority_emoji} {signal.signal_type.replace('_', ' ').title()} ({signal.priority.upper()})")
+                    note_parts.append(f"**Details:** {signal.details}")
+                    note_parts.append(f"**Action:** {signal.action}")
+                    if signal.talking_points:
+                        note_parts.append("**Talking Points:**")
+                        for point in signal.talking_points:
+                            note_parts.append(f"- {point}")
+                    if signal.metadata:
+                        note_parts.append("**Metrics:**")
+                        for key, value in signal.metadata.items():
+                            note_parts.append(f"- {key}: {value}")
+                    note_parts.append("")
+                
+                note_parts.append(f"[View in Intercom](https://app.intercom.com/a/apps/wfkef3s2/companies/{company_id})")
+                
+                note_content = "\n".join(note_parts)
+                create_note(lead_id, "Expansion Signals", note_content)
+                logger.info("Created expansion signals note for lead: %s", lead_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to upsert lead for %s: %s", contact_email, e)
             lead_id = None
+    else:
+        lead_id = None
 
     # Process each signal
     for signal in signals:
@@ -318,12 +409,20 @@ def _process_company_updated(ctx: JobContext) -> None:
                     contact_email=contact_email,
                 )
 
-                # Add Lead_Id to link task to lead
-                task_payload["$se_module"] = "Leads"
-                task_payload["Who_Id"] = lead_id
-
-                task_id = create_task(task_payload)
-                logger.info("Created Zoho task %s for signal: %s", task_id, signal.signal_type)
+                # Extract fields from task_payload and call create_task with keyword args
+                # Ensure due_date is set (default to 7 days from now if missing)
+                due_date = task_payload.get("Due_Date", "")
+                if not due_date:
+                    from datetime import date, timedelta
+                    due_date = (date.today() + timedelta(days=7)).isoformat()
+                
+                create_task(
+                    lead_id=lead_id,
+                    subject=task_payload.get("Subject", f"Expansion Signal: {signal.signal_type}"),
+                    due_date=due_date,
+                    description=task_payload.get("Description", signal.details),
+                )
+                logger.info("Created Zoho task for signal: %s", signal.signal_type)
             except Exception as e:  # noqa: BLE001
                 logger.error("Failed to create Zoho task for signal %s: %s", signal.signal_type, e)
 
