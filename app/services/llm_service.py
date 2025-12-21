@@ -707,3 +707,51 @@ def fetch_grounded_competitors(company_name: str, domain: str, industry: str = "
         return {"competitors_summary": "", "sources": [], "search_queries": []}
 
 
+def analyze_youtube_transcript(*, video_title: str, transcript: str, analysis_mode: str = "comprehensive") -> BaseModel:
+    """Analyze a YouTube video transcript and extract structured insights with enhanced fields."""
+    from app.schemas.llm import YouTubeTranscriptSummary
+    
+    # Truncate transcript if too long
+    transcript_clean = transcript.strip()
+    original_len = len(transcript_clean)
+    
+    if original_len > 100000:
+        first_part = transcript_clean[:50000]
+        last_part = transcript_clean[-50000:]
+        transcript_clean = f"{first_part}\n\n[--- Middle truncated ---]\n\n{last_part}"
+        logger.info("Transcript truncated for analysis: %d -> %d chars", original_len, len(transcript_clean))
+    elif original_len > 50000:
+        first_part = transcript_clean[:30000]
+        last_part = transcript_clean[-20000:]
+        transcript_clean = f"{first_part}\n\n[--- Middle truncated ---]\n\n{last_part}"
+        logger.info("Transcript truncated for analysis: %d -> %d chars", original_len, len(transcript_clean))
+    
+    system = "You are an expert content analyst extracting key insights from video transcripts. Extract structured data as JSON only."
+    
+    if analysis_mode == "comprehensive":
+        fields_list = ["key_quotes", "main_actions", "lessons_learned", "key_topics", "summary",
+                      "people_and_companies_mentioned", "statistics_and_data_points", 
+                      "tools_and_products_mentioned", "resources_mentioned", "frameworks_and_models",
+                      "success_stories", "common_mistakes", "content_type", "target_audience", "sentiment_tone"]
+    else:
+        fields_list = ["key_quotes", "main_actions", "lessons_learned", "key_topics", "summary"]
+    
+    user_prompt = f"""Analyze this YouTube video and extract insights.
+
+VIDEO: {video_title}
+
+FIELDS: {', '.join(fields_list)}
+
+RULES:
+- Lists: number items, separate with \\n (e.g. "1. First\\n2. Second")
+- Prioritize most important items first
+- Include context when valuable
+- Return JSON only, no markdown
+
+TRANSCRIPT:
+{transcript_clean}
+
+Return JSON with all 15 fields. If analysis_mode is basic, extended fields should be empty strings."""
+    
+    logger.info("🎬 Analyzing YouTube transcript mode=%s", analysis_mode)
+    return generate_strict_json(model=YouTubeTranscriptSummary, system_prompt=system, user_prompt=user_prompt)

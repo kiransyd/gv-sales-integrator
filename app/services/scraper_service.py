@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs
 
 import httpx
 from bs4 import BeautifulSoup
@@ -358,3 +359,431 @@ Output JSON only, no markdown or explanation."""
     except Exception as e:
         logger.error("Failed to analyze website content with LLM: %s", e)
         return None
+
+
+def _parse_subtitle_content(subtitle_content: str) -> list[str]:
+    """
+    Parse WebVTT, SRT, or YouTube JSON subtitle content and extract text lines.
+    
+    Args:
+        subtitle_content: Raw subtitle content (WebVTT, SRT, or YouTube JSON format)
+        
+    Returns:
+        List of transcript text lines
+    """
+    lines = []
+    
+    # Try parsing as JSON first (YouTube's internal format)
+    try:
+        import json
+        data = json.loads(subtitle_content)
+        
+        # YouTube JSON format has "events" array with "segs" containing text
+        if isinstance(data, dict) and 'events' in data:
+            for event in data.get('events', []):
+                if 'segs' in event:
+                    text_parts = []
+                    for seg in event.get('segs', []):
+                        if 'utf8' in seg:
+                            text_parts.append(seg['utf8'])
+                    if text_parts:
+                        combined_text = ''.join(text_parts).strip()
+                        if combined_text:
+                            lines.append(combined_text)
+            
+            if lines:
+                logger.debug("Parsed YouTube JSON subtitle format (%d segments)", len(lines))
+                return lines
+    except (json.JSONDecodeError, KeyError, TypeError):
+        # Not JSON format, continue with text parsing
+        pass
+    
+    # Parse as WebVTT or SRT format
+    subtitle_lines = subtitle_content.split('\n')
+    
+    for line in subtitle_lines:
+        line = line.strip()
+        
+        # Skip empty lines
+        if not line:
+            continue
+        
+        # Skip WebVTT header
+        if line.startswith('WEBVTT') or line.startswith('Kind:') or line.startswith('Language:'):
+            continue
+        
+        # Skip SRT sequence numbers
+        if line.isdigit():
+            continue
+        
+        # Skip timestamp lines (WebVTT: 00:00:00.000 --> 00:00:05.000, SRT: same format)
+        if re.match(r'^\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}', line):
+            continue
+        
+        # Skip WebVTT cue settings (align, position, etc.)
+        if line.startswith('align:') or line.startswith('position:') or line.startswith('line:'):
+            continue
+        
+        # Skip HTML tags in subtitles
+        line = re.sub(r'<[^>]+>', '', line)
+        
+        # Skip cue identifiers (WebVTT)
+        if re.match(r'^[A-Za-z0-9_-]+$', line) and len(line) < 50:
+            # Might be a cue identifier, but could also be actual text
+            # Only skip if it looks like an identifier (short, alphanumeric)
+            if len(line) < 20:
+                continue
+        
+        # Add the text line
+        if line and len(line) > 2:
+            lines.append(line)
+    
+    return lines
+
+
+def extract_youtube_video_id(url: str) -> Optional[str]:
+    """
+    Extract YouTube video ID from various URL formats.
+    
+    Supports:
+    - https://www.youtube.com/watch?v=VIDEO_ID
+    - https://youtu.be/VIDEO_ID
+    - https://www.youtube.com/embed/VIDEO_ID
+    - https://youtube.com/watch?v=VIDEO_ID&t=123s
+    
+    Returns:
+        Video ID if found, None otherwise
+    """
+    # Remove whitespace
+    url = url.strip()
+    
+    # Pattern for standard YouTube URLs: youtube.com/watch?v=VIDEO_ID
+    match = re.search(r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})', url)
+    if match:
+        return match.group(1)
+    
+    # Try parsing as URL
+    try:
+        parsed = urlparse(url)
+        if 'youtube.com' in parsed.netloc or 'youtu.be' in parsed.netloc:
+            # Check query params
+            if parsed.query:
+                params = parse_qs(parsed.query)
+                if 'v' in params:
+                    return params['v'][0]
+            # Check path for youtu.be format
+            if 'youtu.be' in parsed.netloc:
+                video_id = parsed.path.lstrip('/')
+                if len(video_id) == 11:
+                    return video_id
+    except Exception:
+        pass
+    
+    return None
+
+
+async def scrape_youtube_transcript(video_url: str) -> Optional[dict[str, Any]]:
+    """
+    Scrape YouTube video transcript using yt-dlp as primary extractor.
+    
+    Args:
+        video_url: YouTube video URL (any format)
+        
+    Returns:
+        Dict with transcript data, or None if failed
+    """
+    video_id = extract_youtube_video_id(video_url)
+    if not video_id:
+        logger.error("Invalid YouTube URL: %s", video_url)
+        return None
+    
+    logger.info("📹 Scraping YouTube transcript for video ID: %s", video_id)
+    
+    transcript_url = f"https://www.youtube.com/watch?v={video_id}"
+    
+    # Primary method: Use yt-dlp (most reliable for YouTube transcripts)
+    try:
+        import yt_dlp
+        
+        logger.info("Using yt-dlp for transcript extraction")
+        
+        # Configure yt-dlp to get video info with subtitle URLs
+        ydl_opts = {
+            'skip_download': True,  # We only want the transcript, not the video
+            'quiet': True,  # Suppress output
+            'no_warnings': True,
+            'listsubtitles': True,  # List available subtitles
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extract video info (this will include subtitle information)
+            info = ydl.extract_info(video_url, download=False)
+            
+            video_title = info.get('title', '')
+            video_id_from_info = info.get('id', video_id)
+            
+            # Get available subtitles and automatic captions
+            subtitles = info.get('subtitles', {})
+            automatic_captions = info.get('automatic_captions', {})
+            
+            transcript_text = None
+            transcript_lines = []
+            
+            # Try manual subtitles first (higher quality)
+            for lang_code in ['en', 'en-US', 'en-GB']:
+                if lang_code in subtitles:
+                    subtitle_list = subtitles[lang_code]
+                    if subtitle_list:
+                        # Get the first available subtitle format (usually vtt or srt)
+                        subtitle_info = subtitle_list[0]
+                        subtitle_url = subtitle_info.get('url')
+                        if subtitle_url:
+                            logger.info("Found manual subtitles in %s, fetching...", lang_code)
+                            try:
+                                async with httpx.AsyncClient(timeout=15.0) as client:
+                                    resp = await client.get(subtitle_url)
+                                    if resp.status_code == 200:
+                                        subtitle_content = resp.text
+                                        logger.debug("Fetched subtitle content (%d chars), parsing...", len(subtitle_content))
+                                        transcript_lines = _parse_subtitle_content(subtitle_content)
+                                        if transcript_lines:
+                                            transcript_text = ' '.join(transcript_lines)
+                                            logger.info("Parsed %d transcript lines from manual subtitles", len(transcript_lines))
+                                            break
+                                        else:
+                                            logger.warning("Failed to parse subtitle content (first 200 chars: %s)", subtitle_content[:200])
+                            except Exception as e:
+                                logger.debug("Failed to fetch manual subtitles: %s", e)
+                                continue
+            
+            # If no manual subtitles, try automatic captions
+            if not transcript_text:
+                for lang_code in ['en', 'en-US', 'en-GB']:
+                    if lang_code in automatic_captions:
+                        caption_list = automatic_captions[lang_code]
+                        if caption_list:
+                            caption_info = caption_list[0]
+                            caption_url = caption_info.get('url')
+                            if caption_url:
+                                logger.info("Found automatic captions in %s, fetching...", lang_code)
+                                try:
+                                    async with httpx.AsyncClient(timeout=15.0) as client:
+                                        resp = await client.get(caption_url)
+                                        if resp.status_code == 200:
+                                            subtitle_content = resp.text
+                                            logger.debug("Fetched caption content (%d chars), parsing...", len(subtitle_content))
+                                            transcript_lines = _parse_subtitle_content(subtitle_content)
+                                            if transcript_lines:
+                                                transcript_text = ' '.join(transcript_lines)
+                                                logger.info("Parsed %d transcript lines from automatic captions", len(transcript_lines))
+                                                break
+                                            else:
+                                                logger.warning("Failed to parse caption content (first 200 chars: %s)", subtitle_content[:200])
+                                except Exception as e:
+                                    logger.debug("Failed to fetch automatic captions: %s", e)
+                                    continue
+            
+            if transcript_text:
+                logger.info("✅ Extracted transcript via yt-dlp (%d segments, %d chars)", 
+                           len(transcript_lines), len(transcript_text))
+                
+                return {
+                    "ok": True,
+                    "video_id": video_id_from_info,
+                    "video_url": transcript_url,
+                    "video_title": video_title,
+                    "transcript": transcript_text,
+                    "transcript_length": len(transcript_text),
+                    "transcript_lines": len(transcript_lines),
+                }
+            else:
+                logger.warning("yt-dlp found video but no transcript available")
+                
+    except ImportError:
+        logger.debug("yt-dlp not installed, trying fallback methods")
+    except Exception as ytdlp_error:
+        logger.warning("yt-dlp failed: %s, trying fallback methods", ytdlp_error)
+    
+    # Fallback 1: Try youtube-transcript-api library
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, CouldNotRetrieveTranscript
+        
+        logger.info("Trying youtube-transcript-api library for transcript extraction")
+        
+        try:
+            transcript_data = YouTubeTranscriptApi.get_transcript(
+                video_id,
+                languages=['en', 'en-US', 'en-GB'],
+            )
+            
+            transcript_lines = [item['text'] for item in transcript_data]
+            transcript_text = ' '.join(transcript_lines)
+            
+            logger.info("✅ Extracted transcript via youtube-transcript-api (%d segments, %d chars)", 
+                       len(transcript_lines), len(transcript_text))
+            
+            # Get video title
+            from crawl4ai import AsyncWebCrawler
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                page_result = await crawler.arun(
+                    url=transcript_url,
+                    bypass_cache=True,
+                    wait_for_timeout=5000,
+                )
+                
+                video_title = None
+                if page_result.success and page_result.html:
+                    soup = BeautifulSoup(page_result.html, 'html.parser')
+                    title_tag = soup.find('title')
+                    if title_tag:
+                        video_title = title_tag.get_text(strip=True).replace(' - YouTube', '')
+            
+            return {
+                "ok": True,
+                "video_id": video_id,
+                "video_url": transcript_url,
+                "video_title": video_title,
+                "transcript": transcript_text,
+                "transcript_length": len(transcript_text),
+                "transcript_lines": len(transcript_lines),
+            }
+        except (TranscriptsDisabled, NoTranscriptFound, CouldNotRetrieveTranscript) as e:
+            logger.warning("YouTube transcript not available via API: %s", e)
+    except ImportError:
+        logger.debug("youtube-transcript-api not installed")
+    except Exception as api_error:
+        logger.warning("youtube-transcript-api failed: %s", api_error)
+        
+    # Fallback 2: Use Crawl4AI with generate_markdown=True
+    try:
+        from crawl4ai import AsyncWebCrawler
+        
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            logger.info("Using Crawl4AI with generate_markdown=True for YouTube transcript extraction")
+            
+            result = await crawler.arun(
+                url=transcript_url,
+                bypass_cache=True,
+                # Enable markdown generation - Crawl4AI may auto-detect YouTube and extract transcript
+                generate_markdown=True,
+                # Wait longer for YouTube page and transcript to load
+                wait_for_timeout=20000,  # 20 seconds max wait (transcripts need time to load)
+                page_timeout=60000,  # 60 seconds total page load timeout
+            )
+            
+            if not result.success:
+                logger.warning("Crawl4AI failed to load YouTube page: %s", result.error_message if hasattr(result, 'error_message') else 'unknown error')
+                return None
+            
+            # Extract transcript from Crawl4AI's markdown output
+            # Crawl4AI automatically extracts YouTube transcripts when generate_markdown=True
+            transcript_text = None
+            
+            if result.markdown:
+                # Crawl4AI should have extracted the transcript into markdown
+                # Look for transcript sections in the markdown
+                lines = result.markdown.split('\n')
+                transcript_lines = []
+                in_transcript_section = False
+                
+                for line in lines:
+                    # Look for transcript indicators
+                    line_lower = line.lower()
+                    if 'transcript' in line_lower or 'captions' in line_lower:
+                        in_transcript_section = True
+                        continue
+                    
+                    # Skip common YouTube page elements
+                    if any(skip in line_lower for skip in [
+                        'youtube home', 'about', 'press', 'copyright', 'contact us',
+                        'creators', 'advertise', 'developers', 'terms', 'privacy',
+                        'policy & safety', 'how youtube works', 'test new features',
+                        'if playback doesn\'t begin', 'videos you watch may be added',
+                        'an error occurred', 'sign in to youtube'
+                    ]):
+                        continue
+                    
+                    # Look for timestamp patterns: [00:00] or 0:00 or similar
+                    if re.search(r'\[\d+:\d+[:\d+]*\]|^\d+:\d+[:\d+]*', line):
+                        # Remove timestamp, keep text
+                        text = re.sub(r'\[\d+:\d+[:\d+]*\]|^\d+:\d+[:\d+]*\s*', '', line).strip()
+                        if text and len(text) > 5:
+                            transcript_lines.append(text)
+                            in_transcript_section = True
+                    # Look for lines that seem like transcript content (longer lines, not headers)
+                    elif in_transcript_section or (len(line.strip()) > 30 and not line.startswith('#') and not line.startswith('[')):
+                        # Filter out obvious page metadata
+                        if not any(meta in line_lower for meta in ['youtube.com', 'http', 'www.', 'click', 'button']):
+                            transcript_lines.append(line.strip())
+                
+                if transcript_lines:
+                    # Clean up: remove duplicates and empty lines
+                    cleaned_lines = []
+                    prev_line = ""
+                    for line in transcript_lines:
+                        line = line.strip()
+                        if line and line != prev_line and len(line) > 3:
+                            cleaned_lines.append(line)
+                            prev_line = line
+                    
+                    if cleaned_lines:
+                        transcript_text = '\n'.join(cleaned_lines)
+                        logger.info("Extracted transcript from Crawl4AI markdown (%d lines)", len(cleaned_lines))
+            
+            # Fallback: Try to extract from HTML if markdown didn't work
+            if not transcript_text and result.html:
+                soup = BeautifulSoup(result.html, 'html.parser')
+                
+                # Look for transcript container
+                transcript_container = soup.find('ytd-transcript-renderer') or soup.find(class_=re.compile('transcript', re.I))
+                
+                if transcript_container:
+                    # Extract text from transcript segments
+                    segments = transcript_container.find_all(['span', 'div'], class_=re.compile('segment|cue', re.I))
+                    if segments:
+                        transcript_lines = []
+                        for segment in segments:
+                            text = segment.get_text(strip=True)
+                            if text and len(text) > 5:  # Filter out very short segments
+                                transcript_lines.append(text)
+                        if transcript_lines:
+                            transcript_text = '\n'.join(transcript_lines)
+                            logger.info("Extracted transcript from HTML (%d segments)", len(transcript_lines))
+            
+            if not transcript_text:
+                logger.warning("Could not extract transcript from YouTube video %s", video_id)
+                return {
+                    "ok": False,
+                    "error": "Transcript not found or not available for this video",
+                    "video_id": video_id,
+                    "video_url": transcript_url,
+                }
+            
+            # Extract video metadata if available
+            video_title = None
+            if result.html:
+                soup = BeautifulSoup(result.html, 'html.parser')
+                title_tag = soup.find('title')
+                if title_tag:
+                    video_title = title_tag.get_text(strip=True).replace(' - YouTube', '')
+            
+            logger.info("✅ Successfully extracted YouTube transcript (%d chars)", len(transcript_text))
+            
+            return {
+                "ok": True,
+                "video_id": video_id,
+                "video_url": transcript_url,
+                "video_title": video_title,
+                "transcript": transcript_text,
+                "transcript_length": len(transcript_text),
+                "transcript_lines": transcript_text.count('\n') + 1,
+            }
+            
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error scraping YouTube transcript: %s", e)
+        return {
+            "ok": False,
+            "error": str(e),
+            "video_id": video_id,
+        }
