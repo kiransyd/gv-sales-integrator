@@ -12,8 +12,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     labels:
       - "coolify.managed=true"
     depends_on:
