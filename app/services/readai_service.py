@@ -289,6 +289,7 @@ def meddic_to_note_content(
     attendees: list[dict[str, Any]] | None = None,
     transcript_raw: Any = None,
     owner: dict[str, Any] | None = None,
+    kb_intelligence: str | None = None,
 ) -> str:
     def g(attr: str) -> str:
         return (getattr(meddic, attr, "") or "").strip()
@@ -324,6 +325,13 @@ def meddic_to_note_content(
     section("Competition", g("competition"))
     section("Next steps", g("next_steps"))
     section("Risks", g("risks"))
+    
+    # Add GoVisually Intelligence section if KB was used
+    if kb_intelligence:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("📚 Adding GoVisually Intelligence section to note (%d chars)", len(kb_intelligence))
+        section("Key Talking Points for Follow-up", kb_intelligence)
 
     if recording_url:
         lines.append(f"Recording: {recording_url}")

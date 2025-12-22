@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-# Production configuration
-BASE_URL = "https://salesapi.apps.govisually.co"
-READAI_SHARED_SECRET = ""  # Empty in production
+# Local development configuration
+BASE_URL = "http://localhost:8000"
+READAI_SHARED_SECRET = ""  # Empty in local dev
 
 # Meeting details
 MEETING_TIME = datetime.now(timezone.utc) - timedelta(hours=1)  # 1 hour ago
@@ -289,7 +289,7 @@ def main():
     print("  2. MEDDIC extraction from transcript")
     print("  3. Attendee notes with speaking stats")
     print("  4. Matching to existing Calendly lead")
-    print("\nTarget environment: PRODUCTION")
+    print("\nTarget environment: LOCAL DEVELOPMENT")
     print(f"Base URL: {BASE_URL}")
     print("\n" + "="*80)
 

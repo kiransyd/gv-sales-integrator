@@ -164,7 +164,7 @@ def _process_meeting_completed(ctx: JobContext) -> None:
         len(str(fields["transcript"] or "")),
         len(str(fields["summary"] or "")),
     )
-    meddic = readai_meddic(
+    meddic, kb_intelligence = readai_meddic(
         title=str(fields["title"] or ""),
         datetime_str=str(fields["datetime"] or ""),
         attendees=attendees,
@@ -241,6 +241,7 @@ def _process_meeting_completed(ctx: JobContext) -> None:
         attendees=attendees,
         transcript_raw=ev.payload.get("transcript"),
         owner=owner,
+        kb_intelligence=kb_intelligence,
     )
     create_note(lead_id, note_title, note_content)
 

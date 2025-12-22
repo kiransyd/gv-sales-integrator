@@ -404,9 +404,20 @@ def readai_meddic(
     attendees: list[dict[str, Any]],
     summary: str,
     transcript: str,
-) -> BaseModel:
+) -> tuple[BaseModel, Optional[str]]:
     from app.schemas.llm import MeddicOutput
 
+    settings = get_settings()
+    kb_store_id = settings.GOVISUALLY_KB_STORE_ID
+    
+    # IMPORTANT: MEDDIC extraction should be PURE transcript - no KB influence
+    # KB is used separately for "GoVisually Intelligence" section only
+    # We'll extract KB intelligence separately after MEDDIC extraction
+    
+    # Do MEDDIC extraction WITHOUT File Search (pure transcript only)
+    # This ensures MEDDIC is 100% based on what was discussed, not KB
+    # KB intelligence will be extracted separately below
+    logger.info("Extracting MEDDIC from transcript only (no KB)")
     schema_hint = MeddicOutput.model_json_schema()
     system = (
         "You are a NO BS style senior enterprise B2B SaaS sales analyst at GoVisually. "
@@ -507,7 +518,250 @@ def readai_meddic(
         f"### TRANSCRIPT:\n{transcript_clean}\n\n"
         "Now extract ALL MEDDIC fields from the transcript above. Return JSON only (no markdown, no code blocks)."
     )
-    return generate_strict_json(model=MeddicOutput, system_prompt=system, user_prompt=user)
+    meddic_result = generate_strict_json(model=MeddicOutput, system_prompt=system, user_prompt=user)
+    
+    # Now extract KB intelligence separately (if KB is configured)
+    kb_intelligence = None
+    if kb_store_id and settings.GEMINI_API_KEY:
+        logger.info("📚 Extracting KB intelligence separately (not used in MEDDIC). Store: %s", kb_store_id)
+        try:
+            kb_intelligence = _extract_kb_intelligence_from_transcript(
+                transcript=transcript,
+                identified_pain=getattr(meddic_result, "identified_pain", "") or "",
+                decision_criteria=getattr(meddic_result, "decision_criteria", "") or "",
+                kb_store_id=kb_store_id,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("KB intelligence extraction failed: %s", e)
+    
+    return meddic_result, kb_intelligence
+
+
+def _extract_kb_intelligence_from_transcript(
+    *,
+    transcript: str,
+    identified_pain: str,
+    decision_criteria: str,
+    kb_store_id: str,
+) -> Optional[str]:
+    """
+    Extract KB intelligence by querying the Knowledge Base based on transcript content.
+    This is separate from MEDDIC extraction to ensure MEDDIC remains pure transcript-based.
+    """
+    import httpx
+    import time
+    from app.settings import get_settings
+    
+    settings = get_settings()
+    
+    # Create a query based on the prospect's pain points and decision criteria
+    def extract_first_n_bullets(text: str, n: int = 4) -> str:
+        """Extract first N bullet points from numbered/bulleted list"""
+        if not text:
+            return ""
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        # Take first N lines (bullet points)
+        return ' '.join(lines[:n])
+
+    query_parts = []
+    if identified_pain:
+        # Extract first 4 pain points
+        pain_summary = extract_first_n_bullets(identified_pain, 4)
+        query_parts.append(f"Prospect pain points: {pain_summary}")
+    if decision_criteria:
+        # Extract first 4 decision criteria
+        criteria_summary = extract_first_n_bullets(decision_criteria, 4)
+        query_parts.append(f"Decision criteria: {criteria_summary}")
+
+    if not query_parts:
+        # Fallback to transcript summary
+        transcript_summary = transcript[:300].replace('\n', ' ')
+        query_parts.append(f"Meeting discussion: {transcript_summary}")
+
+    query = " ".join(query_parts)
+    
+    # Query KB using File Search
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={settings.GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": f"What GoVisually features and capabilities address: {query}"}]}],
+        "tools": [{
+            "fileSearch": {
+                "fileSearchStoreNames": [kb_store_id]
+            }
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1000,
+        },
+    }
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+            body = resp.json()
+        
+        candidate = body.get("candidates", [{}])[0]
+        grounding_metadata = candidate.get("groundingMetadata")
+        
+        if grounding_metadata:
+            chunks_list = grounding_metadata.get("groundingChunks", [])
+            if chunks_list:
+                logger.info("✅ Retrieved %d KB chunks for intelligence extraction", len(chunks_list))
+                return _extract_kb_intelligence_summary(
+                    chunks=chunks_list,
+                    identified_pain=identified_pain,
+                    decision_criteria=decision_criteria,
+                )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("KB intelligence query failed: %s", e)
+    
+    return None
+
+
+def _extract_kb_intelligence_summary(
+    *,
+    chunks: list[dict[str, Any]],
+    identified_pain: str,
+    decision_criteria: str,
+) -> Optional[str]:
+    """
+    Extract and summarize relevant KB intelligence from grounding chunks using LLM synthesis.
+
+    Creates actionable, human-sounding talking points for the sales rep
+    based on what the prospect discussed and what's in our KB.
+    """
+    if not chunks:
+        return None
+
+    # Extract text from chunks
+    chunk_texts = []
+
+    for idx, chunk in enumerate(chunks):
+        # Get chunk text - try multiple possible structures
+        # REST API format uses "retrievedContext.text"
+        retrieved_context = chunk.get("retrievedContext", {})
+        if isinstance(retrieved_context, dict):
+            chunk_text = retrieved_context.get("text", "")
+        else:
+            # Fallback to other possible structures
+            chunk_text = (
+                chunk.get("chunk", {}).get("text") if isinstance(chunk.get("chunk"), dict) else None or
+                chunk.get("text") or
+                chunk.get("content") or
+                ""
+            )
+
+        if chunk_text:
+            # Take up to 800 chars per chunk (more than before for better context)
+            chunk_texts.append(chunk_text[:800])
+        else:
+            logger.debug("Chunk %d has no text: keys=%s", idx, list(chunk.keys()) if isinstance(chunk, dict) else type(chunk))
+
+    if not chunk_texts:
+        logger.warning("No chunk text found in KB chunks (tried %d chunks)", len(chunks))
+        if chunks:
+            logger.debug("First chunk structure: %s", list(chunks[0].keys()) if isinstance(chunks[0], dict) else type(chunks[0]))
+        return None
+
+    # Use LLM to synthesize the chunks into actionable talking points
+    # Limit to top 5 chunks to avoid token limits
+    kb_context = "\n\n---\n\n".join(chunk_texts[:5])
+
+    system_prompt = (
+        "You are a helpful sales teammate at GoVisually who just reviewed our product documentation. "
+        "Your job is to give the sales rep actionable insights they can use in their follow-up with the prospect. "
+        "Be conversational and helpful, like you're chatting with a teammate after overhearing their call."
+    )
+
+    user_prompt = f"""I just got off a call with a prospect. Here's what they mentioned:
+
+THEIR PAIN POINTS:
+{identified_pain if identified_pain else "Not clearly discussed"}
+
+THEIR DECISION CRITERIA:
+{decision_criteria if decision_criteria else "Not clearly discussed"}
+
+I pulled some relevant info from our product docs below. Can you give me 3-5 actionable talking points I should emphasize in my follow-up?
+
+Format each point like: "Highlight [specific feature/capability] because it directly solves [their pain] - emphasize [specific outcome/benefit/ROI]"
+
+Be specific and conversational. Don't just list features - connect them to what the prospect cares about.
+
+PRODUCT DOCS:
+{kb_context}
+
+Return ONLY a numbered list (1. 2. 3. etc.) with your talking points. No markdown, no preamble, no extra text - just the numbered list. Use real line breaks (\\n) between items."""
+
+    logger.info("🤖 Synthesizing KB intelligence with LLM (prospect pain + %d KB chunks)", len(chunk_texts[:5]))
+
+    try:
+        # Use the LLM to synthesize actionable talking points
+        raw_response = _call_gemini(system=system_prompt, user=user_prompt)
+
+        # Clean up the response
+        talking_points = raw_response.strip()
+
+        # Remove any markdown formatting that might have slipped through
+        talking_points = talking_points.replace('**', '').replace('*', '')
+
+        # Ensure we have actual content
+        if len(talking_points) > 50:
+            logger.info("✅ Generated KB intelligence talking points (%d chars)", len(talking_points))
+            return talking_points
+        else:
+            logger.warning("LLM generated too-short KB intelligence (%d chars): %s", len(talking_points), talking_points)
+            return None
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to synthesize KB intelligence with LLM: %s", e)
+        # Fall back to simple extraction if LLM fails
+        return _fallback_kb_extraction(chunk_texts, identified_pain, decision_criteria)
+
+
+def _fallback_kb_extraction(
+    chunk_texts: list[str],
+    identified_pain: str,
+    decision_criteria: str,
+) -> Optional[str]:
+    """
+    Fallback: Simple extraction if LLM synthesis fails.
+    Just extract the most relevant sentences from chunks.
+    """
+    import re
+
+    def clean_text(text: str) -> str:
+        # Remove markdown
+        text = text.replace('**', '').replace('*', '').replace('__', '').replace('_', '')
+        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+        text = ' '.join(text.split())
+        return text.strip()
+
+    # Extract sentences that mention key topics
+    keywords = ['FDA', 'compliance', 'audit', 'version', 'time savings', '85-90%',
+                'regulatory', 'automation', 'CFR', 'reduce', 'saves']
+
+    relevant_sentences = []
+    for chunk in chunk_texts[:3]:
+        clean_chunk = clean_text(chunk)
+        sentences = [s.strip() + '.' for s in clean_chunk.split('.') if s.strip()]
+
+        for sentence in sentences:
+            if len(sentence) > 30 and len(sentence) < 250:
+                if any(keyword.lower() in sentence.lower() for keyword in keywords):
+                    if sentence not in relevant_sentences:
+                        relevant_sentences.append(sentence)
+                        if len(relevant_sentences) >= 5:
+                            break
+
+        if len(relevant_sentences) >= 5:
+            break
+
+    if relevant_sentences:
+        numbered = [f"{i+1}. {s}" for i, s in enumerate(relevant_sentences[:5])]
+        return "\n".join(numbered)
+
+    return None
 
 
 def fetch_grounded_company_news(company_name: str, domain: str) -> dict[str, Any]:

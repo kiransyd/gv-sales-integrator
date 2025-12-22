@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = Field(default="gemini")
     GEMINI_API_KEY: str = Field(default="")
     GEMINI_MODEL: str = Field(default="gemini-1.5-pro")
+    # Knowledge Base (shared with gv-proposal-ai)
+    GOVISUALLY_KB_STORE_ID: str = Field(
+        default="",
+        description="File Search Store ID from gv-proposal-ai. Enables knowledge base-enhanced MEDDIC extraction for Read.ai meetings."
+    )
 
     # Slack
     SLACK_WEBHOOK_URL: str = Field(default="")
